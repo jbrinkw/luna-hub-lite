@@ -35,6 +35,12 @@ INSERT INTO _sec_allowlist VALUES
     'Trigger helper — runs as table owner on every DML. No escalation needed.'),
   ('private.set_stock_lots_updated_at()',
     'Trigger helper — runs as table owner on every DML. No escalation needed.'),
+  ('private.guard_stock_lots_hard_delete()',
+    'BEFORE DELETE trigger helper for chefbyte.stock_lots (Gap G1, '
+    'migration 20260515010000). Converts hard-DELETE to soft-delete to '
+    'prevent the Pi cloud↔Pi ghost-row class. Runs as table owner; '
+    'reads transaction-local GUC for bypass. No user input, no '
+    'escalation — SECURITY INVOKER is correct.'),
   ('private.now_with_freeze()',
     'Read-only helper for L7 clock-freeze harness. Returns coalesce('
     'current_setting(''app.frozen_now'', true)::timestamptz, now()). '

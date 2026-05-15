@@ -34,6 +34,10 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 BEGIN;
+-- Gap G1 (20260515010000): test plumbing DELETEs between cases need
+-- bypass; test exercises live_scale single-track semantics, not the
+-- delete-guard.
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
 SELECT plan(8);
 
 ------------------------------------------------------------

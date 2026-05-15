@@ -18,6 +18,9 @@
 -- stock_lots_in_flight.test.sql for private.apply_shelf_event.
 
 BEGIN;
+-- Gap G1 (20260515010000): test plumbing DELETEs need bypass; test
+-- exercises invariant logic, not the delete-guard.
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
 SELECT plan(14);
 
 ------------------------------------------------------------

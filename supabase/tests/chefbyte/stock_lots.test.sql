@@ -170,7 +170,11 @@ SELECT is(
   'User can update own lot qty_containers'
 );
 
--- Test 10: User can delete own lot
+-- Test 10: User can delete own lot.
+-- Gap G1 (20260515010000): RLS still allows the DELETE, but the
+-- no-hard-delete trigger converts it to a soft-delete (deleted_at IS
+-- NOT NULL). We assert the user-visible behaviour: the lot is no
+-- longer LIVE (treated as gone for inventory purposes).
 DELETE FROM chefbyte.stock_lots
   WHERE user_id = tests.get_supabase_uid('lot_owner')
     AND product_id = :'product_id'
@@ -183,8 +187,9 @@ SELECT ok(
         AND product_id = :'product_id'
         AND location_id = :'fridge_id'
         AND expires_on = '2026-05-01'
+        AND deleted_at IS NULL
   ),
-  'User can delete own lot'
+  'User can delete own lot (live row removed; tombstone persists per Gap G1)'
 );
 
 ------------------------------------------------------------
@@ -234,17 +239,28 @@ SELECT ok(
   'stock_lots exist for product before cascade delete'
 );
 
--- Test 14: Delete the product, verify stock_lots cascade-deleted
+-- Test 14: Delete the product, verify stock_lots cascade-deleted.
+--
+-- Gap G1 (migration 20260515010000): the no-hard-delete trigger would
+-- normally convert the cascading DELETE on stock_lots into a soft-delete,
+-- which would leave an orphan tombstone whose product_id FK target is
+-- gone. The intended pattern for cascade-from-products paths is to set
+-- the per-tx bypass GUC so the cascade hard-deletes. We do that here to
+-- preserve the original assertion (FK cascade still works end-to-end).
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
+
 DELETE FROM chefbyte.products
   WHERE product_id = :'product_id'
     AND user_id = tests.get_supabase_uid('lot_owner');
+
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'off';
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('lot_owner')
       AND product_id = :'product_id'),
   0,
-  'all stock_lots for product deleted after product cascade delete'
+  'all stock_lots for product deleted after product cascade delete (via bypass GUC)'
 );
 
 ------------------------------------------------------------

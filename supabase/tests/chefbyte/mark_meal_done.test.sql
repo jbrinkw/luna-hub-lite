@@ -658,13 +658,18 @@ SELECT is(
 -- Test: After undo meal-prep, [MEAL] stock lot is also deleted
 -- ─────────────────────────────────────────────────────────────
 
+-- Gap G1: unmark_meal_done now soft-deletes the [MEAL] stock_lots first
+-- so the Pi sees the tombstone, then sets the per-tx bypass GUC and
+-- hard-deletes the [MEAL] product (which cascades the lot row away
+-- only after the Pi's poll window has already captured the tombstone).
+-- End state: zero rows because the cascade hard-delete completed.
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots sl
     JOIN chefbyte.products p ON sl.product_id = p.product_id
     WHERE p.user_id = tests.get_supabase_uid('meal_tester')
       AND p.name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
   0,
-  '[MEAL] stock lot deleted after unmark_meal_done on meal-prep'
+  '[MEAL] stock lot removed after unmark_meal_done (cascade-hard-delete via bypass GUC)'
 );
 
 -- ─────────────────────────────────────────────────────────────

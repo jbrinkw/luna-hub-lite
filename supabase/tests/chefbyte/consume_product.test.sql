@@ -174,14 +174,17 @@ SELECT lives_ok(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 9: First lot deleted (fully consumed)
+-- Test 9: First lot soft-deleted (fully consumed) — Gap G1 fix.
+-- Migration 20260515010000 converts the FIFO depletion DELETE to a
+-- soft-delete so the Pi's lot_snapshot poller sees the tombstone.
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots
-    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_a')),
+    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_a')
+      AND deleted_at IS NULL),
   0,
-  'first lot deleted after full depletion'
+  'first lot soft-deleted after full depletion (deleted_at IS NOT NULL)'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -211,15 +214,17 @@ SELECT lives_ok(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 12: Stock fully depleted — 0 lots remaining
+-- Test 12: Stock fully depleted — 0 LIVE lots remaining (Gap G1).
+-- Tombstones from prior soft-deletes are excluded via deleted_at IS NULL.
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('cf_tester')
-      AND product_id = (SELECT val::uuid FROM _test_state WHERE key = 'chicken_pid')),
+      AND product_id = (SELECT val::uuid FROM _test_state WHERE key = 'chicken_pid')
+      AND deleted_at IS NULL),
   0,
-  'stock fully depleted — 0 lots remaining'
+  'stock fully depleted — 0 LIVE lots remaining (tombstones excluded)'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -318,13 +323,15 @@ SELECT is(
 -- ─────────────────────────────────────────────────────────────
 -- Test 18: Stock IS deducted even when log_macros=false
 -- The lot had 0.5 containers; consuming 0.5 should deplete it
+-- (soft-delete per Gap G1)
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots
-    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_serving')),
+    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_serving')
+      AND deleted_at IS NULL),
   0,
-  'stock lot depleted even when log_macros=false (0.5 consumed from 0.5)'
+  'stock lot soft-deleted even when log_macros=false (0.5 consumed from 0.5)'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -589,9 +596,10 @@ SELECT chefbyte.consume_product(
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.stock_lots
-    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_dated')),
+    WHERE lot_id = (SELECT val::uuid FROM _test_state WHERE key = 'lot_dated')
+      AND deleted_at IS NULL),
   0,
-  'dated lot fully consumed and deleted after cross-lot consume'
+  'dated lot fully consumed and soft-deleted after cross-lot consume'
 );
 
 SELECT is(

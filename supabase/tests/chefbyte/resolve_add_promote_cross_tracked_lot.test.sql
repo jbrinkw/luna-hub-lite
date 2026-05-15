@@ -29,6 +29,13 @@
 -- unreachable. The count guard is defense-in-depth.
 
 BEGIN;
+-- Gap G1 (20260515010000): test plumbing uses DELETE FROM chefbyte.stock_lots
+-- to clean up between sub-scenarios. The no-hard-delete trigger would
+-- convert these to soft-deletes and the next-scenario INSERT would
+-- collide with the surviving tombstone on stock_lots_merge_key. Tests
+-- exercise apply_shelf_event / resolve_add_to_shelf_lot, not the
+-- delete-guard itself; bypass is the right scope.
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
 SELECT plan(11);
 
 ------------------------------------------------------------

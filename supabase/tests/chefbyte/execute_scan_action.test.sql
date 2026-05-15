@@ -145,12 +145,16 @@ SELECT cmp_ok(
   'consume_no_macros did NOT write an additional food_log (still 1 from consume_macros)'
 );
 
+-- Gap G1: depleted lots are now soft-deleted (deleted_at IS NOT NULL)
+-- instead of hard-deleted, so the Pi's lot_snapshot_poller can mirror
+-- the tombstone. We filter to live rows only.
 SELECT cmp_ok(
   (SELECT count(*)::int FROM chefbyte.stock_lots
     WHERE user_id    = :'_uid'::uuid
-      AND product_id = :'_pid'::uuid),
+      AND product_id = :'_pid'::uuid
+      AND deleted_at IS NULL),
   '=', 0,
-  'consume_no_macros drained the stock_lot to 0 (FEFO waterfall deletes depleted lots)'
+  'consume_no_macros drained the stock_lot to 0 (FEFO waterfall soft-deletes depleted lots)'
 );
 
 ------------------------------------------------------------
@@ -207,13 +211,14 @@ SELECT is(
 -- consumed amount regardless of stock" project rule.
 ------------------------------------------------------------
 
--- Sanity: stock IS empty heading in.
+-- Sanity: stock IS empty heading in (live rows only; tombstones excluded).
 SELECT cmp_ok(
   (SELECT count(*)::int FROM chefbyte.stock_lots
     WHERE user_id = :'_uid'::uuid
-      AND product_id = :'_pid'::uuid),
+      AND product_id = :'_pid'::uuid
+      AND deleted_at IS NULL),
   '=', 0,
-  'precondition: stock_lots is empty for the test product'
+  'precondition: stock_lots is empty for the test product (live rows only)'
 );
 
 -- Capture food_logs count before the empty-stock consume.
@@ -287,14 +292,16 @@ SELECT lives_ok(
   'multi-lot consume_no_macros qty=2 containers does not raise'
 );
 
--- Lot A (qty=0.5, expires sooner) should be fully drained → DELETED.
+-- Lot A (qty=0.5, expires sooner) should be fully drained → SOFT-DELETED
+-- per Gap G1 (deleted_at IS NOT NULL, qty_containers = 0).
 SELECT cmp_ok(
   (SELECT count(*)::int FROM chefbyte.stock_lots
     WHERE user_id = :'_uid'::uuid
       AND product_id = :'_pid'::uuid
-      AND expires_on = (current_date + 1)::date),
+      AND expires_on = (current_date + 1)::date
+      AND deleted_at IS NULL),
   '=', 0,
-  'multi-lot waterfall: lot A (nearer expiry) fully drained and deleted'
+  'multi-lot waterfall: lot A (nearer expiry) fully drained and soft-deleted'
 );
 
 -- Lot B (qty=10, expires later) should have 10 - 1.5 = 8.5 remaining.

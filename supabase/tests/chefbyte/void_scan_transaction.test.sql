@@ -13,7 +13,7 @@
 -- private.execute_scan_action.
 
 BEGIN;
-SELECT plan(13);
+SELECT plan(14);
 
 ------------------------------------------------------------
 -- Setup — project-canonical test helpers (auth + activation)
@@ -80,11 +80,25 @@ SELECT lives_ok(
   'void_scan_transaction(purchase) does not raise'
 );
 
+-- Gap G1 fix (migration 20260515010000): the BEFORE DELETE trigger
+-- converts the hard-DELETE to a soft-delete so the Pi's lot_snapshot
+-- poller picks the tombstone up. The row still exists with
+-- deleted_at NOT NULL + qty_containers = 0.
 SELECT cmp_ok(
   (SELECT count(*)::int FROM chefbyte.stock_lots
-    WHERE lot_id = :'_lot_purchase'::uuid),
+    WHERE lot_id = :'_lot_purchase'::uuid
+      AND deleted_at IS NULL),
   '=', 0,
-  'void deleted the applied stock_lot'
+  'void soft-deleted the applied stock_lot (deleted_at IS NOT NULL — tombstone)'
+);
+
+SELECT cmp_ok(
+  (SELECT count(*)::int FROM chefbyte.stock_lots
+    WHERE lot_id = :'_lot_purchase'::uuid
+      AND deleted_at IS NOT NULL
+      AND qty_containers = 0),
+  '=', 1,
+  'void left a tombstone row (qty=0, deleted_at set) for Pi delta sync'
 );
 
 SELECT is(

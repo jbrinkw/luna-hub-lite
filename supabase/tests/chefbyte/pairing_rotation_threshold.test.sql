@@ -21,6 +21,9 @@
 --      products.default_shelf_life_days is null.
 
 BEGIN;
+-- Gap G1 (20260515010000): test plumbing DELETEs need bypass; test
+-- exercises pairing rotation + mint paths, not the delete-guard.
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
 SELECT plan(15);
 
 ------------------------------------------------------------

@@ -21,6 +21,9 @@
 --      step 2.5 never sees them).
 
 BEGIN;
+-- Gap G1 (20260515010000): test plumbing DELETEs need bypass; test
+-- exercises apply_shelf_event / resolve_add_to_shelf_lot, not the guard.
+SET LOCAL chefbyte.stock_lots_allow_hard_delete = 'on';
 SELECT plan(12);
 
 ------------------------------------------------------------
