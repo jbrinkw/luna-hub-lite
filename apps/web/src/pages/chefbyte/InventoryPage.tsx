@@ -29,7 +29,7 @@ import { todayStr } from '@/shared/dates';
 import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
 import { useUnitSystem } from '@/shared/useUnitSystem';
-import { livetrackTagState, livetrackTagClassNames } from './livetrackTagState';
+import { livetrackTagState, livetrackTagClassNames, livetrackTagVisible } from './livetrackTagState';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -128,6 +128,15 @@ interface GroupedProduct {
    * lives on the lots view; the grouped view collapses to "any lot".
    */
   anyLotOnScale: boolean;
+  /**
+   * The full ordered list of ``last_update_source`` values across this
+   * product's lots. Threaded through to ``livetrackTagVisible`` in the
+   * grouped-view render so an uncertified-but-touched product still shows
+   * the red "delta-only" LiveTrack tag (the bug fix — see
+   * ``livetrackTagVisible``). Manual + null entries are kept as-is so the
+   * helper can filter; we don't pre-filter here.
+   */
+  lotLastUpdateSources: ReadonlyArray<'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null>;
 }
 
 type ViewMode = 'grouped' | 'lots';
@@ -685,6 +694,11 @@ export function InventoryPage() {
         latestSourceTs,
         inFlightSince,
         anyLotOnScale,
+        // Carry forward the raw `last_update_source` for each lot so the
+        // grouped-view render gate can call `livetrackTagVisible` without
+        // re-grouping. We pass the full list (including 'manual' + null)
+        // and let the helper filter — keeps the dataflow declarative.
+        lotLastUpdateSources: productLots.map((l) => l.last_update_source),
       };
     });
   }, [products, lots, liveScalePairedProductIds, pairedLotIds]);
@@ -1558,7 +1572,18 @@ export function InventoryPage() {
 
               {/* Product rows */}
               {filteredGrouped.map(
-                ({ product, totalStock, nearestExpiry, latestSource, inFlightSince, anyLotOnScale }, idx) => {
+                (
+                  {
+                    product,
+                    totalStock,
+                    nearestExpiry,
+                    latestSource,
+                    inFlightSince,
+                    anyLotOnScale,
+                    lotLastUpdateSources,
+                  },
+                  idx,
+                ) => {
                   const isZeroStock = totalStock <= 0;
                   // A zero-stock product that's currently in-flight is NOT really
                   // "missing" — it's off the shelf, waiting to be placed back.
@@ -1642,13 +1667,26 @@ export function InventoryPage() {
                             (LiveTrack enrollment / scale tare capture) and is
                             ready for shelf events. Independent of On Scale +
                             In Flight; a certified product can sit on a shelf
-                            (unpaired) just fine. */}
-                          {product.certified === true &&
+                            (unpaired) just fine.
+
+                            Visibility gate uses ``livetrackTagVisible`` so
+                            an UNCERTIFIED product that has nonetheless been
+                            touched by the LiveTrack system (any lot whose
+                            ``last_update_source`` is in the LiveTrack set)
+                            still shows the red "delta-only" tag — that's
+                            the natural intermediate state for a near-full
+                            container that placed onto the catch-all without
+                            triggering the empty-bottle auto-tare heuristic. */}
+                          {livetrackTagVisible({
+                            certified: product.certified,
+                            lotLastUpdateSources,
+                          }) &&
                             (() => {
                               const tag = livetrackTagState({
                                 tare_weight_g: product.tare_weight_g,
                                 measured_full_at: product.measured_full_at,
                                 net_weight_g: product.net_weight_g,
+                                certified: product.certified,
                               });
                               return (
                                 <span
@@ -1868,13 +1906,21 @@ export function InventoryPage() {
                           [MEAL]
                         </span>
                       )}
-                      {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at. */}
-                      {lot.productCertified &&
+                      {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at.
+                         Visibility uses `livetrackTagVisible` so an uncertified
+                         lot whose `last_update_source` is in the LiveTrack set
+                         still surfaces the red "delta-only" tag — see the
+                         helper for the full rationale. */}
+                      {livetrackTagVisible({
+                        certified: lot.productCertified,
+                        lotLastUpdateSources: [lot.last_update_source],
+                      }) &&
                         (() => {
                           const tag = livetrackTagState({
                             tare_weight_g: lot.productTareWeightG,
                             measured_full_at: lot.productMeasuredFullAt,
                             net_weight_g: lot.productNetWeightG,
+                            certified: lot.productCertified,
                           });
                           return (
                             <span
@@ -2017,13 +2063,19 @@ export function InventoryPage() {
                                 [MEAL]
                               </span>
                             )}
-                            {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at. */}
-                            {lot.productCertified &&
+                            {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at.
+                               Visibility via `livetrackTagVisible` — uncertified
+                               LiveTrack-touched lots still surface the red tag. */}
+                            {livetrackTagVisible({
+                              certified: lot.productCertified,
+                              lotLastUpdateSources: [lot.last_update_source],
+                            }) &&
                               (() => {
                                 const tag = livetrackTagState({
                                   tare_weight_g: lot.productTareWeightG,
                                   measured_full_at: lot.productMeasuredFullAt,
                                   net_weight_g: lot.productNetWeightG,
+                                  certified: lot.productCertified,
                                 });
                                 return (
                                   <span

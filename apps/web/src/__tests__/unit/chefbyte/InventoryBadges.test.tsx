@@ -324,13 +324,19 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       expect(within(row).queryByTestId('on-scale-badge-prod-cert-in-flight')).toBeNull();
     });
 
-    it('uncertified + paired product: shows On Scale, NO Certified, NO In Flight', async () => {
+    it('uncertified + paired product: shows On Scale + LiveTrack (delta-only), NO In Flight', async () => {
+      // After the 2026-05 fix, the LiveTrack tag is no longer gated solely
+      // on `products.certified`. An uncertified product whose lots have a
+      // LiveTrack `last_update_source` (`catch_all` / `live_shelf` /
+      // `live_scale`) still surfaces the tag in its red "delta-only" state
+      // — that's the natural intermediate state between "first touched"
+      // and "tare captured". See `livetrackTagVisible`.
       renderPage();
       await screen.findByTestId('inv-product-prod-paired-uncert');
 
       const row = screen.getByTestId('inv-product-prod-paired-uncert');
       expect(within(row).getByTestId('on-scale-badge-prod-paired-uncert')).toBeInTheDocument();
-      expect(within(row).queryByTestId('livetrack-tag-prod-paired-uncert')).toBeNull();
+      expect(within(row).getByTestId('livetrack-tag-prod-paired-uncert')).toBeInTheDocument();
       expect(within(row).queryByTestId('inflight-badge')).toBeNull();
     });
 
@@ -378,7 +384,12 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       expect(screen.queryAllByTestId('lot-on-scale-badge-lot-cert-in-flight').length).toBe(0);
     });
 
-    it('lot-paired-uncert: shows On Scale, NO Certified, NO In Flight', async () => {
+    it('lot-paired-uncert: shows On Scale + LiveTrack (delta-only), NO In Flight', async () => {
+      // Mirrors the grouped-view fix above — a lot with a LiveTrack
+      // `last_update_source` ('live_scale' here) surfaces the LiveTrack
+      // tag even when `productCertified` is false. The tag's colour is
+      // still computed by `livetrackTagState` and lands on red because
+      // `tare_weight_g` is null on uncertified products.
       renderPage();
       const user = userEvent.setup();
       await screen.findByTestId('inv-product-prod-paired-uncert');
@@ -386,7 +397,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
 
       await screen.findAllByTestId('lot-row-lot-paired-uncert');
       expect(screen.getAllByTestId('lot-on-scale-badge-lot-paired-uncert').length).toBeGreaterThan(0);
-      expect(screen.queryAllByTestId('lot-livetrack-tag-lot-paired-uncert').length).toBe(0);
+      expect(screen.getAllByTestId('lot-livetrack-tag-lot-paired-uncert').length).toBeGreaterThan(0);
       expect(screen.queryAllByTestId('lot-inflight-badge-lot-paired-uncert').length).toBe(0);
     });
 
