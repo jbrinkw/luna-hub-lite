@@ -2536,8 +2536,22 @@ def create_app(
                         "heartbeat_provider: DB read failed",
                         exc_info=True,
                     )
+                # Translate Pi-local shelf literals → cloud kind vocab
+                # before sending. ``merged`` carries values from two
+                # sources: the registry (already cloud vocab) and the
+                # local ``scale_pairings.shelf_id`` rows (Pi vocab — uses
+                # the legacy ``single_item`` literal for the live-scale
+                # kind). The cloud heartbeat validator only accepts
+                # {live_shelf, catch_all, live_scale}; an untranslated
+                # ``single_item`` makes it 400 the ENTIRE heartbeat, so
+                # the device's last_heartbeat_ts never updates and every
+                # scale shows stale in the Settings → Scales UI. Every
+                # other Pi→cloud boundary already calls pi_to_cloud();
+                # this one was the gap. Bijective + unknown-kinds-
+                # passthrough, so registry values round-trip unchanged.
+                from .cloud._kind_translate import pi_to_cloud as _kt
                 scales = [
-                    {"scale_id": sid, "kind": kind}
+                    {"scale_id": sid, "kind": _kt(kind)}
                     for sid, kind in sorted(merged.items())
                 ]
                 return {

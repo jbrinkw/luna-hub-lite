@@ -1924,7 +1924,17 @@ function sanitizeHeartbeatLots(rawLots: unknown): { ok: true; lots: any[] } | { 
 }
 
 async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
-  const pendingReviewCount: number = typeof body?.pending_review_count === 'number' ? body.pending_review_count : 0;
+  // Audit H-9: guard pending_review_count the same way the outbox counters
+  // below already are. The device UPDATE writes last_heartbeat_ts AND
+  // pending_review_count in ONE statement; an unguarded -1/3.5/Infinity/NaN
+  // trips the `>= 0` CHECK -> the whole heartbeat 500s -> last_heartbeat_ts
+  // never persists -> the device shows offline in Settings -> Scales (same
+  // blackhole class as the invalid-kind bug). Coerce out-of-range to 0.
+  const rawPendingReview = body?.pending_review_count;
+  const pendingReviewCount: number =
+    typeof rawPendingReview === 'number' && Number.isFinite(rawPendingReview) && rawPendingReview >= 0
+      ? Math.trunc(rawPendingReview)
+      : 0;
   // Scenario 7: the Pi heartbeat_provider includes these two counters so
   // the cloud UI can render backlog state (finding #10 of the cloud audit).
   // Non-negative guard: a bad client (or negative-number-as-string) must not
@@ -1955,17 +1965,33 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
   }
   const sanitizedLots = lotsValidation.lots;
 
-  // Pre-validate every scale entry so a 400 prevents partial writes.
+  // Validate scale entries, but DROP invalid ones rather than rejecting
+  // the whole heartbeat. A heartbeat is primarily a device-liveness
+  // signal: one misconfigured/legacy scale entry must NOT blackhole the
+  // device's last_heartbeat_ts (which is exactly what happened when a
+  // Pi sent the legacy ``single_item`` literal untranslated — every
+  // scale showed "Nd ago" in Settings → Scales even though the Pi was
+  // alive). Valid scales still upsert; invalid ones are logged + skipped
+  // so the next tick (or a Pi fix) reconciles them.
+  const validScales: Array<{ scale_id: string; kind: string }> = [];
   for (const s of scales) {
     if (!s || typeof s !== 'object') {
-      return jsonResponse({ error: 'invalid scales entry' }, 400);
+      console.warn('shelf-ingest: heartbeat dropping non-object scale entry', { device_id: device.device_id });
+      continue;
     }
     if (typeof s.scale_id !== 'string' || s.scale_id.length === 0 || s.scale_id.length > MAX_SCALE_ID_LEN) {
-      return jsonResponse({ error: 'invalid scale_id' }, 400);
+      console.warn('shelf-ingest: heartbeat dropping scale with invalid scale_id', { device_id: device.device_id });
+      continue;
     }
     if (typeof s.kind !== 'string' || !VALID_KINDS.includes(s.kind as (typeof VALID_KINDS)[number])) {
-      return jsonResponse({ error: 'invalid kind' }, 400);
+      console.warn('shelf-ingest: heartbeat dropping scale with invalid kind', {
+        device_id: device.device_id,
+        scale_id: s.scale_id,
+        kind: s.kind,
+      });
+      continue;
     }
+    validScales.push({ scale_id: s.scale_id, kind: s.kind });
   }
 
   const now = new Date().toISOString();
@@ -1992,11 +2018,11 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
   //     scale_id) DO UPDATE serializes on the unique index.
   //   - product_id is explicitly omitted from the UPDATE SET clause so
   //     existing pairings keep whatever product the user set via the UI.
-  if (scales.length > 0) {
+  if (validScales.length > 0) {
     const { error: hbErr } = await (supabase as any).schema('chefbyte').rpc('heartbeat_upsert_pairings_admin', {
       p_device_id: device.device_id,
       p_user_id: userId,
-      p_scales: scales,
+      p_scales: validScales,
     });
     if (hbErr) {
       console.error('shelf-ingest: heartbeat_upsert_pairings_admin failed', {
