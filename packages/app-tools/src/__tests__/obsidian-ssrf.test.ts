@@ -94,13 +94,25 @@ describe('Obsidian SSRF protection — allows public GitHub hosts', () => {
     expect(creds!.apiUrl).toBe('https://api.github.com');
   });
 
-  it('returns credentials for a public GitHub Enterprise hostname', () => {
+  it('preserves the API base path for self-hosted Gitea (.../api/v1)', () => {
+    // H-15: Gitea / GitHub Enterprise expose their REST API under a base path
+    // (Gitea = "/api/v1", GHE = "/api/v3"). The validator MUST keep that path
+    // so `${apiUrl}/repos/...` resolves; dropping it 404s every call.
+    const creds = getGitCredentials(obsidianCtx({ github_api_url: 'https://git.corp/api/v1' }));
+    expect(creds).not.toBeNull();
+    expect(creds!.apiUrl).toBe('https://git.corp/api/v1');
+  });
+
+  it('preserves the API base path for a public GitHub Enterprise hostname', () => {
     const creds = getGitCredentials(obsidianCtx({ github_api_url: 'https://ghe.example.com/api/v3' }));
     expect(creds).not.toBeNull();
-    // origin drops the path; that matches the pre-SSRF-guard behavior of
-    // stripping trailing slashes on the base URL. Callers always append
-    // their own path segments.
-    expect(creds!.apiUrl).toBe('https://ghe.example.com');
+    expect(creds!.apiUrl).toBe('https://ghe.example.com/api/v3');
+  });
+
+  it('normalizes a trailing slash on the configured base path (no // double-slash)', () => {
+    const creds = getGitCredentials(obsidianCtx({ github_api_url: 'https://git.corp/api/v1/' }));
+    expect(creds).not.toBeNull();
+    expect(creds!.apiUrl).toBe('https://git.corp/api/v1');
   });
 
   it('treats empty-string github_api_url as "unset" and falls back to the default', () => {
@@ -113,6 +125,50 @@ describe('Obsidian SSRF protection — allows public GitHub hosts', () => {
     const creds = getGitCredentials(obsidianCtx({ github_api_url: '   ' }));
     expect(creds).not.toBeNull();
     expect(creds!.apiUrl).toBe('https://api.github.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End-to-end composition: the base path the user configures must flow through
+// to the ACTUAL outbound fetch URL (this is the surface H-15 broke). Drive a
+// real tool with a mocked fetch and assert the request path.
+// ---------------------------------------------------------------------------
+
+describe('Obsidian base-path composition — outbound fetch URL', () => {
+  // Minimal Response stub for getTree (reads resp.ok + resp.json().tree).
+  function okTree() {
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: () => Promise.resolve({ tree: [] }),
+      text: () => Promise.resolve('{"tree":[]}'),
+    });
+  }
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  async function fetchedUrlFor(github_api_url: string): Promise<string> {
+    mockFetch.mockReturnValue(okTree());
+    const tools = obsidianTools as unknown as Record<string, { handler: (args: any, ctx: any) => Promise<any> }>;
+    await tools.OBSIDIAN_get_project_hierarchy.handler({}, obsidianCtx({ github_api_url }));
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    return mockFetch.mock.calls[0][0] as string;
+  }
+
+  it('keeps /api/v1 in the request URL for self-hosted Gitea', async () => {
+    const url = await fetchedUrlFor('https://git.corp/api/v1');
+    // Must hit .../api/v1/repos/...; dropping the path would 404 every call.
+    expect(url).toBe('https://git.corp/api/v1/repos/testuser/vault/git/trees/main?recursive=1');
+  });
+
+  it('does NOT produce a // double-slash for the default github.com base', async () => {
+    const url = await fetchedUrlFor('https://api.github.com');
+    expect(url).toBe('https://api.github.com/repos/testuser/vault/git/trees/main?recursive=1');
+    // Guard the exact regression a naive origin+pathname fix would introduce.
+    expect(url).not.toContain('com//repos');
   });
 });
 

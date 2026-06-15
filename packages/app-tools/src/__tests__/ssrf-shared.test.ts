@@ -35,6 +35,10 @@ describe('validateExternalUrl — block list', () => {
     ['RFC1918 192.168/16', 'http://192.168.1.1/'],
     ['RFC1918 172.16/12 lower bound', 'http://172.16.0.1/'],
     ['RFC1918 172.31/12 upper bound', 'http://172.31.255.254/'],
+    // Path preservation must NOT weaken host validation: a private host with
+    // a plausible Gitea base path is still blocked (regression guard for H-15).
+    ['RFC1918 host with /api/v1 base path', 'http://10.0.0.1/api/v1'],
+    ['localhost with /api/v1 base path', 'http://localhost/api/v1'],
 
     // IPv6 loopback / link-local / ULA
     ['IPv6 loopback [::1]', 'http://[::1]/'],
@@ -90,12 +94,36 @@ describe('validateExternalUrl — allow list', () => {
     );
   });
 
-  it('drops the path component (returns origin only)', () => {
-    expect(validateExternalUrl('https://ghe.example.com/api/v3')).toBe('https://ghe.example.com');
+  it('preserves the configured API base path (Gitea / GitHub Enterprise)', () => {
+    // H-15 regression: the normalizer must NOT drop the path. A self-hosted
+    // Gitea host is configured as ".../api/v1"; if the path is stripped,
+    // every `${base}/repos/...` call 404s. The returned base must keep it.
+    expect(validateExternalUrl('https://git.corp/api/v1')).toBe('https://git.corp/api/v1');
+    expect(validateExternalUrl('https://ghe.example.com/api/v3')).toBe('https://ghe.example.com/api/v3');
   });
 
-  it('strips trailing slashes via origin normalization', () => {
+  it('strips a trailing slash from a configured base path (no // double-slash)', () => {
+    // A user who enters ".../api/v1/" must get ".../api/v1" so callers that
+    // append "/repos/..." don't produce "//repos/...".
+    expect(validateExternalUrl('https://git.corp/api/v1/')).toBe('https://git.corp/api/v1');
+  });
+
+  it('returns the bare origin (no trailing slash) when there is no base path', () => {
+    // github.com / a root-path URL must collapse to just the origin so
+    // `${base}/repos/...` stays single-slashed. pathname "/" must NOT leak
+    // through as a trailing slash.
+    expect(validateExternalUrl('https://api.github.com')).toBe('https://api.github.com');
     expect(validateExternalUrl('https://api.github.com/')).toBe('https://api.github.com');
+  });
+
+  it('strips embedded credentials from the base URL (keeps origin + path only)', () => {
+    // userinfo must never survive into the returned base — otherwise it would
+    // be carried into every downstream fetch URL.
+    expect(validateExternalUrl('https://user:pass@git.corp/api/v1')).toBe('https://git.corp/api/v1');
+  });
+
+  it('strips query string and fragment from the base URL (keeps path)', () => {
+    expect(validateExternalUrl('https://git.corp/api/v1?token=secret#frag')).toBe('https://git.corp/api/v1');
   });
 
   it('lowercases the hostname (URL spec normalization)', () => {

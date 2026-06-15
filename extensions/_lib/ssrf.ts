@@ -29,14 +29,20 @@
  */
 
 export interface ValidateExternalUrlResult {
-  /** Normalized origin (`protocol://host[:port]`) when safe, else null. */
+  /**
+   * Normalized base URL (`protocol://host[:port][/base/path]`) when safe, else
+   * null. Userinfo, query and fragment are stripped; any configured base path
+   * is preserved (trailing slash removed).
+   */
   origin: string | null;
 }
 
 /**
  * Validate a user-supplied URL against the SSRF block list. Returns the
- * normalized origin (`URL.origin` — drops trailing slash, lower-cases the
- * host, preserves explicit ports) when the URL is safe, or `null` when:
+ * normalized base URL (`URL.origin` + `URL.pathname` with trailing slashes
+ * stripped — lower-cases the host, preserves explicit ports, preserves any
+ * configured base path such as Gitea's `/api/v1`, and strips userinfo / query
+ * / fragment) when the URL is safe, or `null` when:
  *   - The URL is unparseable (`new URL(...)` throws).
  *   - The protocol is not `http:` or `https:`.
  *   - The host matches any block-list rule above.
@@ -92,7 +98,14 @@ export function validateExternalUrl(raw: string): string | null {
     v4Candidates.some((h) => /^169\.254\./.test(h)) ||
     v4Candidates.some((h) => /^172\.(1[6-9]|2\d|3[01])\./.test(h));
   if (isBlocked) return null;
-  // origin drops trailing slashes and normalizes case — matches the legacy
-  // `(api_url || DEFAULT).replace(/\/+$/, '')` behavior in both validators.
-  return parsed.origin;
+  // Preserve the configured base path (e.g. Gitea "/api/v1", GHE "/api/v3")
+  // so callers that append "/repos/..." resolve against the right endpoint.
+  // `origin` already strips userinfo/query/fragment and normalizes the host
+  // case + default ports; we re-append only the pathname. Trailing slashes
+  // are stripped (WHATWG sets pathname to "/" for an empty path, which would
+  // otherwise become a stray trailing slash and produce "//repos/..." once a
+  // caller appends its own leading-slash segment) — matching the legacy
+  // `(api_url || DEFAULT).replace(/\/+$/, '')` normalization.
+  const path = parsed.pathname.replace(/\/+$/, '');
+  return parsed.origin + path;
 }
