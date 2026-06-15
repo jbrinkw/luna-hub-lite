@@ -18,6 +18,7 @@ import { logTempItem } from '../../chefbyte/log-temp-item';
 import { setPrice } from '../../chefbyte/set-price';
 import { createRecipe } from '../../chefbyte/create-recipe';
 import { getRecipes } from '../../chefbyte/get-recipes';
+import { updateRecipe } from '../../chefbyte/update-recipe';
 import { getCookable } from '../../chefbyte/get-cookable';
 import { addMeal } from '../../chefbyte/add-meal';
 import { getMealPlan } from '../../chefbyte/get-meal-plan';
@@ -1524,27 +1525,59 @@ describe('ChefByte Tool Integration Tests', () => {
         .eq('user_id', userId);
       expect(dbItems!.every((i: any) => i.purchased === true)).toBe(true);
 
-      // Import
+      // Import. ctx.supabase is the service-role client (no JWT), so this
+      // exercises the H-18 fix: the handler must call the _admin overload with
+      // ctx.userId — the auth.uid()-based wrapper would raise 'No storage
+      // locations found' here because auth.uid() is NULL under service_role.
       const result = await importShoppingToInventory.handler({}, ctx);
       const data = parseToolResult(result);
 
+      // Handler return shape is { message, lots_created, imported_at } — there
+      // is no `lots` array (the old assertion was stale; the RPC returns a
+      // JSONB summary, not per-lot rows). lots_created=2 is the RPC's own
+      // report that both purchased rows were processed — the core H-18 proof
+      // that the import ran (pre-fix it raised 'No storage locations found'
+      // under service_role). Exact per-lot qty is asserted on a clean,
+      // isolated user in the pgTAP test (mcp_admin_overloads.test.sql); here
+      // both products already carry residual lots from the addStock/consume
+      // describes above, so a total-qty assertion would be order-dependent.
       expect(data.message).toContain('2 item(s)');
       expect(data.lots_created).toBe(2);
-      expect(data.lots).toHaveLength(2);
+      expect(data.imported_at).toBeTruthy();
+      expect(data.lots).toBeUndefined();
 
-      // Verify stock lots were created
-      const lot1 = data.lots.find((l: any) => l.product_id === productId);
-      expect(lot1).toBeDefined();
-      expect(lot1.qty_containers).toBe(3);
+      // Both imported products have at least one VISIBLE (not ghosted) lot —
+      // proves the import wrote real, spendable stock rather than landing on a
+      // tombstone (the C-2 ghost-import class, now closed by the T1 trigger).
+      const { data: lots } = await admin
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('product_id, qty_containers, deleted_at')
+        .eq('user_id', userId)
+        .is('deleted_at', null);
+      expect(lots!.some((l: any) => l.product_id === productId)).toBe(true);
+      expect(lots!.some((l: any) => l.product_id === secondProductId)).toBe(true);
 
-      const lot2 = data.lots.find((l: any) => l.product_id === secondProductId);
-      expect(lot2).toBeDefined();
-      expect(lot2.qty_containers).toBe(1);
+      // Verify the imported rows left the ACTIVE cart: the import stamps
+      // imported_at (it does NOT delete rows — that has been the design since
+      // migration 20260425010000). The active cart is `imported_at IS NULL`.
+      // (We assert against the DB directly rather than getShoppingList, which
+      // does not yet filter imported_at — a separate finding, SEAM-MCP-03.)
+      const { data: activeRows } = await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('cart_item_id')
+        .eq('user_id', userId)
+        .is('imported_at', null);
+      expect(activeRows).toHaveLength(0);
 
-      // Verify shopping list is now empty (purchased items removed)
-      const afterList = await getShoppingList.handler({}, ctx);
-      const afterListData = parseToolResult(afterList);
-      expect(afterListData.total_items).toBe(0);
+      const { data: importedRows } = await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('cart_item_id')
+        .eq('user_id', userId)
+        .not('imported_at', 'is', null);
+      expect(importedRows).toHaveLength(2);
     });
 
     it('returns error when no purchased items exist', async () => {
@@ -1566,6 +1599,89 @@ describe('ChefByte Tool Integration Tests', () => {
 
       // Cleanup
       await clearShopping.handler({}, ctx);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 23b. updateRecipe — metadata patch + full ingredient replacement (H-17)
+  // -----------------------------------------------------------------------
+  // ctx.supabase is the service-role client (no JWT), so the ingredient-replace
+  // path here is the exact MCP condition from H-17: auth.uid() is NULL inside
+  // the RPC. Before the fix the handler called the 2-arg public wrapper, which
+  // forwarded private.save_recipe_ingredients(NULL, …) → 'Recipe not found'.
+  // The handler now calls save_recipe_ingredients_admin with ctx.userId.
+
+  describe('updateRecipe', () => {
+    let recipeId: string;
+
+    it('creates a recipe to update (2 ingredients)', async () => {
+      const result = await createRecipe.handler(
+        {
+          name: 'Update Target Recipe',
+          base_servings: 2,
+          ingredients: [
+            { product_id: productId, quantity: 1 },
+            { product_id: secondProductId, quantity: 0.5 },
+          ],
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+      recipeId = data.recipe.recipe_id;
+      expect(recipeId).toBeTruthy();
+    });
+
+    it('fully replaces the ingredient list via the service-role _admin overload (H-17)', async () => {
+      const result = await updateRecipe.handler(
+        {
+          recipe_id: recipeId,
+          name: 'Updated Recipe Name',
+          // Replace the 2-ingredient list with a single different ingredient.
+          ingredients: [{ product_id: secondProductId, quantity: 3, unit: 'container' }],
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+      expect(data.success).toBe(true);
+      expect(data.ingredients_replaced).toBe(true);
+      expect(data.meta_fields_updated).toContain('name');
+
+      // The ingredient list was actually replaced (not a no-op / partial fail):
+      // exactly one ingredient now, and it is the new product+qty.
+      const { data: ings } = await admin
+        .schema('chefbyte')
+        .from('recipe_ingredients')
+        .select('product_id, quantity')
+        .eq('recipe_id', recipeId);
+      expect(ings).toHaveLength(1);
+      expect(ings![0].product_id).toBe(secondProductId);
+      expect(Number(ings![0].quantity)).toBe(3);
+
+      // And the metadata patch landed.
+      const { data: recipeRow } = await admin
+        .schema('chefbyte')
+        .from('recipes')
+        .select('name')
+        .eq('recipe_id', recipeId)
+        .single();
+      expect(recipeRow!.name).toBe('Updated Recipe Name');
+    });
+
+    it('patches metadata only when ingredients omitted (list untouched)', async () => {
+      const result = await updateRecipe.handler({ recipe_id: recipeId, base_servings: 5 }, ctx);
+      const data = parseToolResult(result);
+      expect(data.ingredients_replaced).toBe(false);
+
+      // The single ingredient from the previous replace is still present.
+      const { data: ings } = await admin
+        .schema('chefbyte')
+        .from('recipe_ingredients')
+        .select('product_id')
+        .eq('recipe_id', recipeId);
+      expect(ings).toHaveLength(1);
+
+      // Cleanup so later recipe-count assertions are unaffected.
+      await deleteRecipe.handler({ recipe_id: recipeId }, ctx);
     });
   });
 

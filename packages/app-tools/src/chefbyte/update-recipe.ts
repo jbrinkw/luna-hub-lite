@@ -87,9 +87,16 @@ export const updateRecipe: ToolDefinition = {
         unit: ing.unit ?? 'container',
         note: ing.note ?? null,
       }));
-      const { error: rpcErr } = await ctx.supabase
-        .schema('chefbyte')
-        .rpc('save_recipe_ingredients', { p_recipe_id: recipe_id, p_ingredients: payload });
+      // The MCP worker runs as service_role with no JWT, so auth.uid() is NULL
+      // inside the RPC. The 2-arg public wrapper forwards
+      // private.save_recipe_ingredients((SELECT auth.uid()), …) → p_user_id=NULL
+      // → the ownership guard always raises 'Recipe not found'. Call the
+      // service_role-only _admin overload with ctx.userId instead (H-17 / T3).
+      const { error: rpcErr } = await (ctx.supabase as any).schema('chefbyte').rpc('save_recipe_ingredients_admin', {
+        p_user_id: ctx.userId,
+        p_recipe_id: recipe_id,
+        p_ingredients: payload,
+      });
       if (rpcErr) return toolError(`Failed to replace ingredients: ${rpcErr.message}`);
     }
 

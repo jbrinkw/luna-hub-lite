@@ -20,9 +20,16 @@ export const importShoppingToInventory: ToolDefinition = {
     // Single-call RPC. Handles location resolution, stock_lot merge/insert,
     // and imported_at stamping atomically. Prevents double-imports and
     // orphaned stock_lots if a step mid-batch fails.
-    const { data, error } = await (ctx.supabase as any)
-      .schema('chefbyte')
-      .rpc('import_shopping_to_inventory', { p_location_id: location_id ?? null });
+    //
+    // The MCP worker runs as service_role with no JWT, so auth.uid() is NULL
+    // inside the RPC. The 1-arg public wrapper forwards
+    // private.import_shopping_to_inventory((SELECT auth.uid()), …) →
+    // p_user_id=NULL → 'No storage locations found for user'. Call the
+    // service_role-only _admin overload with ctx.userId instead (H-18 / T3).
+    const { data, error } = await (ctx.supabase as any).schema('chefbyte').rpc('import_shopping_to_inventory_admin', {
+      p_user_id: ctx.userId,
+      p_location_id: location_id ?? null,
+    });
 
     if (error) return toolError(`Failed to import shopping list: ${error.message}`);
 
