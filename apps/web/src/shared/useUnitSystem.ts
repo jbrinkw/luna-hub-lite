@@ -6,19 +6,25 @@
  * Defaults to 'imperial' before the profile loads or for users predating
  * the 2026-04-30 migration. Caches via TanStack so the read is shared
  * across pages and re-fetched only when the profile mutates (AccountPage
- * invalidates queryKeys.profile on save).
+ * invalidates the profile keys on save).
+ *
+ * H-13 / PROFILE-CACHE: this reads its OWN `profileKeys.unitSystem` key — it
+ * MUST NOT share a key with AppProvider (bare number day_start_hour) or any
+ * other profile consumer, or it would read a foreign shape and mis-derive the
+ * unit (e.g. a metric user silently getting imperial). See `profileKeys` in
+ * queryKeys.ts.
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from './auth/AuthProvider';
-import { queryKeys } from './queryKeys';
+import { profileKeys } from './queryKeys';
 import type { UnitSystem } from './recipes/formatIngredientDisplay';
 
 export function useUnitSystem(): UnitSystem {
   const { user } = useAuth();
   const { data } = useQuery({
-    queryKey: queryKeys.profile(user?.id ?? 'anon'),
+    queryKey: profileKeys.unitSystem(user?.id ?? 'anon'),
     queryFn: async () => {
       if (!user) return null;
       const { data: row, error } = await supabase

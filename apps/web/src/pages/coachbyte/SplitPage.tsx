@@ -39,12 +39,12 @@ interface Exercise {
 
 export function SplitPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   // Today's weekday (0..6) computed against the user's logical-date so
   // late-night editing past midnight UTC still maps to the right day.
   // Drives the FLAG F5 passive hint banner ("editing today's split
   // doesn't propagate to today's plan").
-  const todayWeekday = new Date(`${todayStr(dayStartHour)}T00:00:00`).getDay();
+  const todayWeekday = new Date(`${todayStr(dayStartHour, timezone)}T00:00:00`).getDay();
   const [splits, setSplits] = useState<DaySplit[]>([]);
   const [savingDay, setSavingDay] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);

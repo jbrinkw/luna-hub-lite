@@ -1,9 +1,9 @@
 import { useState, useRef, useMemo, useEffect } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
-import { queryKeys } from '@/shared/queryKeys';
+import { queryKeys, profileKeys } from '@/shared/queryKeys';
 import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -41,6 +41,7 @@ const TIMEZONES = getTimezones();
 
 export function AccountPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState('');
   const [timezone, setTimezone] = useState('America/New_York');
   const [dayStartHour, setDayStartHour] = useState(6);
@@ -133,6 +134,18 @@ export function AccountPage() {
     onSuccess: () => {
       setMessage({ type: 'success', text: 'Profile updated' });
       flash();
+      // H-13 / PROFILE-CACHE: the four profile consumers now hold DISTINCT
+      // cache keys, so a single full-row save must invalidate every one of
+      // them — otherwise AppProvider (day_start_hour/timezone), useUnitSystem
+      // (unit_system) and ClassifierTab (classifier fallback) keep serving
+      // stale values until their staleTime elapses. (Previously this save
+      // invalidated nothing at all.)
+      if (user) {
+        queryClient.invalidateQueries({ queryKey: profileKeys.full(user.id) });
+        queryClient.invalidateQueries({ queryKey: profileKeys.dayStart(user.id) });
+        queryClient.invalidateQueries({ queryKey: profileKeys.unitSystem(user.id) });
+        queryClient.invalidateQueries({ queryKey: profileKeys.classifierFallback(user.id) });
+      }
     },
     onError: (error: Error) => {
       setMessage({ type: 'error', text: error.message });

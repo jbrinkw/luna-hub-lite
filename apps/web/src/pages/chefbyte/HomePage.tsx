@@ -222,7 +222,7 @@ export function computeMealEntryMacros(
 
 export function HomePage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   const userId = user?.id;
 
@@ -262,7 +262,7 @@ export function HomePage() {
   /*  Data loading via useQuery                                        */
   /* ---------------------------------------------------------------- */
 
-  const today = todayStr(dayStartHour);
+  const today = todayStr(dayStartHour, timezone);
 
   // Use a stable composite key for all homepage data
   const homeQueryKey = ['chef-home', userId, today] as const;

@@ -392,7 +392,7 @@ export function pickLatestAutomatedSource(
 export function InventoryPage() {
   const { user } = useAuth();
   const unitSystem = useUnitSystem();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
 
@@ -754,7 +754,7 @@ export function InventoryPage() {
   /*  NOT expired (food is still good through the printed date).      */
   /* ---------------------------------------------------------------- */
 
-  const todayYmd = todayStr(dayStartHour);
+  const todayYmd = todayStr(dayStartHour, timezone);
 
   const expiredLots = useMemo(() => {
     const productMap = new Map(products.map((p) => [p.product_id, p]));
@@ -930,7 +930,7 @@ export function InventoryPage() {
   /*  Actions                                                          */
   /* ---------------------------------------------------------------- */
 
-  const getLogicalDate = () => todayStr(dayStartHour);
+  const getLogicalDate = () => todayStr(dayStartHour, timezone);
 
   const invalidateInventory = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user!.id) });

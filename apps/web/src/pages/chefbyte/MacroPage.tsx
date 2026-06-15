@@ -220,14 +220,14 @@ export function calcCaloriesFromMacros(protein: number, carbs: number, fat: numb
 
 export function MacroPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   const unitSystem = useUnitSystem();
   // Initial date = current logical date (respects day_start_hour).
   // Without the shift, at 05:30 local time with day_start_hour=6 the page
   // would show an empty "today" while the consume flows (InventoryPage,
   // shelf-ingest) correctly stamp food_logs with yesterday's logical_date.
-  const [currentDate, setCurrentDate] = useState(() => todayStr(dayStartHour));
+  const [currentDate, setCurrentDate] = useState(() => todayStr(dayStartHour, timezone));
 
   /* ---- Temp Item modal ---- */
   const [showTempModal, setShowTempModal] = useState(false);
@@ -317,6 +317,11 @@ export function MacroPage() {
   /*  Date navigation                                                  */
   /* ---------------------------------------------------------------- */
 
+  // prev/next operate on `currentDate` (a YYYY-MM-DD string) parsed at host-local
+  // midnight, so `toDateStr` MUST stay host-local here — passing the profile tz
+  // would re-interpret that local-midnight instant in another zone and shift the
+  // calendar day by one. (H-19 only concerns "now" → logical-date; see `todayStr`
+  // below, which IS tz-aware.)
   const prevDate = () => {
     setCurrentDate((prev) => {
       const d = new Date(prev + 'T00:00:00');
@@ -334,7 +339,7 @@ export function MacroPage() {
   };
 
   const goToday = () => {
-    setCurrentDate(todayStr(dayStartHour));
+    setCurrentDate(todayStr(dayStartHour, timezone));
   };
 
   /* ---------------------------------------------------------------- */

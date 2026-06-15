@@ -197,7 +197,7 @@ export function autoScaleNutrition(
 
 export function ScannerPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   const barcodeRef = useRef<HTMLInputElement>(null);
   const [searchParams] = useSearchParams();
@@ -1378,7 +1378,7 @@ export function ScannerPage() {
         };
       }
       case 'consume_macros': {
-        const logicalDate = todayStr(dayStartHour);
+        const logicalDate = todayStr(dayStartHour, timezone);
         const { error: rpcErr } = await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
@@ -1427,7 +1427,7 @@ export function ScannerPage() {
           p_qty: qty,
           p_unit: unitType,
           p_log_macros: false,
-          p_logical_date: todayStr(dayStartHour),
+          p_logical_date: todayStr(dayStartHour, timezone),
         });
 
         const cLocId = defaultLocationId;

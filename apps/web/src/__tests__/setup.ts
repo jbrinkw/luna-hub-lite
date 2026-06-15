@@ -27,6 +27,7 @@ vi.mock('@/shared/AppProvider', () => ({
     online: true,
     lastSynced: new Date(),
     dayStartHour: 0,
+    timezone: 'America/New_York',
     refreshActivations: vi.fn(),
     realtimeDegraded: false,
     reconnectRealtime: vi.fn(async () => {}),

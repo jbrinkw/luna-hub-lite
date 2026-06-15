@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useMemo, type ReactNode
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './auth/AuthProvider';
 import { supabase } from './supabase';
-import { queryKeys } from './queryKeys';
+import { queryKeys, profileKeys } from './queryKeys';
 import { useRealtimeInvalidation } from './useRealtimeInvalidation';
 import { useRealtimeHealth } from './useRealtimeHealth';
 
@@ -12,6 +12,13 @@ interface AppContextType {
   online: boolean;
   lastSynced: Date | null;
   dayStartHour: number;
+  /**
+   * The user's profile IANA timezone (e.g. "America/New_York"). Thread this
+   * into `todayStr`/`toDateStr` so client-computed logical dates match the
+   * server's `private.get_logical_date` (which uses this same timezone). See
+   * `shared/dates.ts` — H-19.
+   */
+  timezone: string;
   refreshActivations: () => Promise<void>;
   // True iff any tracked Supabase Realtime channel has lost its SUBSCRIBED
   // status or missed 3 heartbeats — see `realtimeHealth.ts`.
@@ -29,6 +36,7 @@ const AppContext = createContext<AppContextType>({
   online: true,
   lastSynced: null,
   dayStartHour: 0,
+  timezone: 'America/New_York',
   refreshActivations: async () => {},
   realtimeDegraded: false,
   reconnectRealtime: async () => {},
@@ -63,21 +71,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     enabled: !!user,
   });
 
-  const { data: dayStartHour = 0 } = useQuery({
-    queryKey: queryKeys.profile(user?.id ?? ''),
+  const { data: profile } = useQuery({
+    // H-13 / PROFILE-CACHE: distinct `dayStart` key. This caches a
+    // `{ dayStartHour, timezone }` shape that is incompatible with the other
+    // profile consumers (useUnitSystem's `{ unit_system }`, ClassifierTab's
+    // `{ chefbyte_classifier_fallback_enabled }`, AccountPage's full row), so
+    // it MUST NOT share a cache key with them. See `profileKeys`.
+    queryKey: profileKeys.dayStart(user?.id ?? ''),
     queryFn: async () => {
       const { data, error } = await supabase
         .schema('hub')
         .from('profiles')
-        .select('day_start_hour')
+        .select('day_start_hour, timezone')
         .eq('user_id', user!.id)
         .single();
       if (error) throw error;
-      return data?.day_start_hour ?? 0;
+      return {
+        dayStartHour: data?.day_start_hour ?? 0,
+        // Profile `timezone` is NOT NULL with a default, but fall back to the
+        // same default the DB uses if a malformed/empty row slips through.
+        timezone: (data?.timezone as string | null) || 'America/New_York',
+      };
     },
     enabled: !!user,
     staleTime: 10 * 60 * 1000,
   });
+
+  const dayStartHour = profile?.dayStartHour ?? 0;
+  const timezone = profile?.timezone ?? 'America/New_York';
 
   // Realtime invalidation for activation changes
   useRealtimeInvalidation('app-activations', [
@@ -119,6 +140,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       online,
       lastSynced,
       dayStartHour,
+      timezone,
       refreshActivations,
       realtimeDegraded,
       reconnectRealtime,
@@ -129,6 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       online,
       lastSynced,
       dayStartHour,
+      timezone,
       refreshActivations,
       realtimeDegraded,
       reconnectRealtime,

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Toggle } from '@/components/ui/Toggle';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
-import { queryKeys } from '@/shared/queryKeys';
+import { profileKeys } from '@/shared/queryKeys';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -37,7 +37,10 @@ export function ClassifierTab() {
   const queryClient = useQueryClient();
 
   const { data: profile, isLoading } = useQuery({
-    queryKey: queryKeys.profile(user!.id),
+    // H-13 / PROFILE-CACHE: distinct `classifierFallback` key so this
+    // `{ chefbyte_classifier_fallback_enabled }` read never collides with the
+    // other profile consumers' shapes. See `profileKeys`.
+    queryKey: profileKeys.classifierFallback(user!.id),
     queryFn: async () => {
       const { data, error } = await supabase
         .schema('hub')
@@ -67,7 +70,7 @@ export function ClassifierTab() {
       if (error) throw error;
     },
     onMutate: async (next: boolean) => {
-      const key = queryKeys.profile(user!.id);
+      const key = profileKeys.classifierFallback(user!.id);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData<ClassifierProfile>(key);
       queryClient.setQueryData<ClassifierProfile>(key, (old) => ({
@@ -78,11 +81,11 @@ export function ClassifierTab() {
     },
     onError: (_err, _next, context) => {
       if (context?.previous !== undefined) {
-        queryClient.setQueryData(queryKeys.profile(user!.id), context.previous);
+        queryClient.setQueryData(profileKeys.classifierFallback(user!.id), context.previous);
       }
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.profile(user!.id) });
+      queryClient.invalidateQueries({ queryKey: profileKeys.classifierFallback(user!.id) });
     },
   });
 

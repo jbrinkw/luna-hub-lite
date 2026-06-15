@@ -124,6 +124,26 @@ const kindLabel: Record<ScalePairing['kind'], string> = {
   catch_all: 'catch-all',
 };
 
+/**
+ * Sentinel prefix for the synthetic "close in-flight lot" device that
+ * `close_in_flight_lot` mints (`device_name='manual'`,
+ * `import_key_hash='manual_close_in_flight_<uid>'`, `is_active=false`; see
+ * migration 20260427110000:263-285). It is an audit-only stub: it can never
+ * post shelf events and its `import_key_hash` is NOT a real SHA-256, so
+ * "Reactivate" is a no-op. — H-22 / A6-01.
+ */
+const CLOSE_IN_FLIGHT_DEVICE_PREFIX = 'manual_close_in_flight_';
+
+/**
+ * True for the synthetic close-in-flight device. Such devices must be hidden
+ * from the device list AND excluded from the silent-revoke banner so a
+ * throwaway audit stub never triggers the alarming "Pi key was deactivated"
+ * UI (H-22).
+ */
+export function isSyntheticCloseInFlightDevice(d: { import_key_hash: string }): boolean {
+  return d.import_key_hash.startsWith(CLOSE_IN_FLIGHT_DEVICE_PREFIX);
+}
+
 /* ================================================================== */
 /*  ScalesTab                                                          */
 /* ================================================================== */
@@ -185,7 +205,12 @@ export function ScalesTab() {
         .eq('user_id', user!.id)
         .order('created_at');
       if (err) throw err;
-      return (data ?? []) as LiveShelfDevice[];
+      // H-22 / A6-01: drop the synthetic `close_in_flight_lot` audit device.
+      // It can never post events and its "Reactivate" is a no-op, so it must
+      // not appear in the device list, the device count, or the silent-revoke
+      // banner. Filtered here (not via a server `.not()`) so PostgREST `LIKE`
+      // escaping isn't a concern and the rule lives next to the predicate.
+      return ((data ?? []) as LiveShelfDevice[]).filter((d) => !isSyntheticCloseInFlightDevice(d));
     },
     enabled: !!user,
     // Heartbeat freshness matters; refetch every 15s to keep relative times honest.
@@ -249,8 +274,13 @@ export function ScalesTab() {
    * on the device card is sufficient.
    */
   const silentRevokeDevice = useMemo(() => {
-    if (devices.length !== 1) return null;
-    const only = devices[0];
+    // H-22 / A6-01: never alert on the synthetic close-in-flight stub. This
+    // guard is belt-and-suspenders — the devices query already filters these
+    // out — so the banner stays correct even if `devices` is ever populated by
+    // another path (e.g. an optimistic cache write).
+    const real = devices.filter((d) => !isSyntheticCloseInFlightDevice(d));
+    if (real.length !== 1) return null;
+    const only = real[0];
     return only.is_active ? null : only;
   }, [devices]);
 

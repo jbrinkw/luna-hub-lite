@@ -1,7 +1,42 @@
+/**
+ * Profile query keys — H-13 / PROFILE-CACHE.
+ *
+ * The `hub.profiles` row is read by four independent consumers, each of which
+ * `.select(...)`s a DIFFERENT subset of columns:
+ *   - AccountPage      → `full`              (display_name, timezone, day_start_hour, unit_system)
+ *   - AppProvider      → `dayStart`          (bare number day_start_hour)
+ *   - useUnitSystem    → `unitSystem`        ({ unit_system })
+ *   - ClassifierTab    → `classifierFallback`({ chefbyte_classifier_fallback_enabled })
+ *
+ * TanStack Query v5 dedupes strictly by key and shares ONE cached `data`
+ * entry per key. When all four shared a single `['profile', userId]` key, the
+ * first consumer to mount (AppProvider, which wraps every protected route)
+ * cached a bare NUMBER; within its staleTime the others read that number and
+ * mis-derived their field (e.g. a metric user got 'imperial' because
+ * `(number).unit_system === undefined`). Giving each consumer a DISTINCT key
+ * eliminates the cross-shape collision.
+ */
+export const profileKeys = {
+  /** Full-row read used by AccountPage (and the back-compat `profile` alias). */
+  full: (userId: string) => ['profile', userId, 'full'] as const,
+  /** Bare `day_start_hour` number read by AppProvider. */
+  dayStart: (userId: string) => ['profile', userId, 'dayStart'] as const,
+  /** `{ unit_system }` read by useUnitSystem. */
+  unitSystem: (userId: string) => ['profile', userId, 'unitSystem'] as const,
+  /** `{ chefbyte_classifier_fallback_enabled }` read by ClassifierTab. */
+  classifierFallback: (userId: string) => ['profile', userId, 'classifierFallback'] as const,
+} as const;
+
 export const queryKeys = {
   // Hub
   activations: (userId: string) => ['activations', userId] as const,
-  profile: (userId: string) => ['profile', userId] as const,
+  /**
+   * Back-compat alias for the AccountPage full-row profile read. The other
+   * three profile consumers (AppProvider, useUnitSystem, ClassifierTab) read
+   * their own DISTINCT `profileKeys.*` keys to avoid the cross-shape cache
+   * collision documented on `profileKeys` above (H-13 / PROFILE-CACHE).
+   */
+  profile: (userId: string) => profileKeys.full(userId),
   apiKeys: (userId: string) => ['api-keys', userId] as const,
   tools: (userId: string) => ['tools', userId] as const,
   extensions: (userId: string) => ['extensions', userId] as const,

@@ -300,7 +300,7 @@ function stockBadgeClass(status: StockStatus): string {
 
 export function RecipesPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
 
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
@@ -424,7 +424,7 @@ export function RecipesPage() {
       // also count. Without it a user with 4 expired yogurts would
       // toggle the chip and see ZERO matches — the exact recipes the
       // chip is meant to surface.
-      const today = todayStr(dayStartHour);
+      const today = todayStr(dayStartHour, timezone);
       const ymd = (offsetDays: number) => {
         const d = new Date(today + 'T00:00:00');
         d.setDate(d.getDate() + offsetDays);

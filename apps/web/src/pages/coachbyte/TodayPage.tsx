@@ -310,7 +310,7 @@ export async function extendTimerRpc(
 
 export function TodayPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   const [showAdHoc, setShowAdHoc] = useState(false);
   const [addingPlanned, setAddingPlanned] = useState(false);
@@ -363,7 +363,7 @@ export function TodayPage() {
     installAudioUnlockOnFirstGesture();
   }, []);
 
-  const today = todayStr(dayStartHour);
+  const today = todayStr(dayStartHour, timezone);
 
   // ── Daily Plan query ──
   const {

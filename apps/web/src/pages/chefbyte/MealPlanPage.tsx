@@ -202,12 +202,15 @@ export function reduceDayTotalsExcludingPrep<
 
 export function MealPlanPage() {
   const { user } = useAuth();
-  const { dayStartHour } = useAppContext();
+  const { dayStartHour, timezone } = useAppContext();
   const queryClient = useQueryClient();
   // Initial week = Monday of the current logical date's week.
-  // Respects day_start_hour so early-morning sessions before the daily
-  // rollover don't jump to the calendar-next-day's week.
-  const [weekStart, setWeekStart] = useState(() => getMonday(new Date(todayStr(dayStartHour) + 'T00:00:00')));
+  // Respects day_start_hour AND the profile timezone (H-19) so early-morning
+  // sessions before the daily rollover don't jump to the next day's week, and
+  // the week matches the server's logical calendar. The resulting `weekStart`
+  // is a host-local-midnight Date seeded from the tz-aware date string, so the
+  // downstream `toDateStr(weekStart…)` calls stay host-local (no second shift).
+  const [weekStart, setWeekStart] = useState(() => getMonday(new Date(todayStr(dayStartHour, timezone) + 'T00:00:00')));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   /* ---- Add meal modal state ---- */
@@ -375,7 +378,7 @@ export function MealPlanPage() {
   // Today's logical date (respects day_start_hour — at 05:30 local with
   // dsh=6 this returns yesterday so the MealPlan highlights the day the
   // user's macros/meals are actually attributed to).
-  const todayLogical = todayStr(dayStartHour);
+  const todayLogical = todayStr(dayStartHour, timezone);
 
   useEffect(() => {
     if (!isLoading && selectedDay === null) {
@@ -402,8 +405,8 @@ export function MealPlanPage() {
   };
 
   const goToday = () => {
-    // Snap to the week containing today's logical date (respects dsh).
-    setWeekStart(getMonday(new Date(todayStr(dayStartHour) + 'T00:00:00')));
+    // Snap to the week containing today's logical date (respects dsh + tz).
+    setWeekStart(getMonday(new Date(todayStr(dayStartHour, timezone) + 'T00:00:00')));
     setSelectedDay(null);
   };
 
