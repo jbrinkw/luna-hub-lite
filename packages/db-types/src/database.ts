@@ -326,6 +326,7 @@ export type Database = {
           logical_date: string
           meal_id: string
           meal_prep: boolean
+          meal_product_id: string | null
           meal_type: string | null
           product_id: string | null
           recipe_id: string | null
@@ -338,6 +339,7 @@ export type Database = {
           logical_date: string
           meal_id?: string
           meal_prep?: boolean
+          meal_product_id?: string | null
           meal_type?: string | null
           product_id?: string | null
           recipe_id?: string | null
@@ -350,6 +352,7 @@ export type Database = {
           logical_date?: string
           meal_id?: string
           meal_prep?: boolean
+          meal_product_id?: string | null
           meal_type?: string | null
           product_id?: string | null
           recipe_id?: string | null
@@ -357,6 +360,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "meal_plan_entries_meal_product_id_fkey"
+            columns: ["meal_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
           {
             foreignKeyName: "meal_plan_entries_product_id_fkey"
             columns: ["product_id"]

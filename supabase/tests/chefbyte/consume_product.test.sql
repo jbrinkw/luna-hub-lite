@@ -6,7 +6,7 @@
 -- the same prefix, creating FK-collision risk under concurrent runs.
 
 BEGIN;
-SELECT plan(38);
+SELECT plan(40);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup — capture generated IDs into a temp table to avoid
@@ -421,7 +421,9 @@ SELECT is(
   'consume_product return: macros sub-object has exactly 4 keys'
 );
 
--- Verify top-level has exactly 4 keys: success, qty_consumed, macros, stock_remaining
+-- Verify top-level has exactly 5 keys: success, qty_consumed, food_log_id,
+-- macros, stock_remaining. (food_log_id added by 20260515100000 for the
+-- H-14 fix — present even when p_log_macros=false, where it is NULL.)
 SELECT is(
   (SELECT count(*)::integer FROM jsonb_object_keys(
     chefbyte.consume_product(
@@ -429,8 +431,39 @@ SELECT is(
       0.001, 'container', false, '2026-03-03'::date
     )
   )),
-  4,
-  'consume_product return: top-level JSONB has exactly 4 keys (success, qty_consumed, macros, stock_remaining)'
+  5,
+  'consume_product return: top-level JSONB has exactly 5 keys (success, qty_consumed, food_log_id, macros, stock_remaining)'
+);
+
+-- H-14: food_log_id is NULL when p_log_macros=false (no row inserted).
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    (SELECT val::uuid FROM _test_state WHERE key = 'chicken_pid'),
+    0.001, 'container', false, '2026-03-03'::date
+  ))->'food_log_id'),
+  'null'::jsonb,
+  'consume_product return: food_log_id is JSON null when p_log_macros=false'
+);
+
+-- H-14: food_log_id when p_log_macros=true points at a REAL, freshly
+-- inserted food_logs row (so mark_meal_done can tag exactly that row).
+-- Capture the returned id once, then assert it resolves to an existing
+-- row — NOT by re-deriving "latest" (every row in this txn shares
+-- created_at, so an ORDER BY created_at re-read is non-deterministic; that
+-- fragility is precisely what H-14 replaces).
+SELECT ((chefbyte.consume_product(
+    (SELECT val::uuid FROM _test_state WHERE key = 'chicken_pid'),
+    0.001, 'container', true, '2026-03-03'::date
+  ))->>'food_log_id') AS h14_log_id \gset
+
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM chefbyte.food_logs
+    WHERE log_id = :'h14_log_id'::uuid
+      AND user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = (SELECT val::uuid FROM _test_state WHERE key = 'chicken_pid')
+  ),
+  'consume_product return: food_log_id resolves to the food_log row it just inserted'
 );
 
 -- Verify food_log logical_date is set correctly on records inserted by consume_product

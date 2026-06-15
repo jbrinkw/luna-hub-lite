@@ -81,13 +81,14 @@ Default locations (Fridge, Pantry, Freezer) are seeded per user on ChefByte acti
 
 - `pr_tracked_exercise_ids` JSONB DEFAULT NULL — array of exercise UUIDs to show on the PRs page. NULL means "track all exercises" (migration 20260304040003)
 
-### `chefbyte.meal_plan_entries` — new column
+### `chefbyte.meal_plan_entries` — new columns
 
 - `meal_type` TEXT CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')) — categorizes meal plan entries by meal type (migration 20260304050000)
+- `meal_product_id` UUID (FK → chefbyte.products, `ON DELETE SET NULL`, nullable) — the `[MEAL]` product `mark_meal_done` created for this meal-prep entry (migration 20260515100000). `unmark_meal_done` deletes the `[MEAL]` product **by this id** instead of reconstructing its name, so a 2nd same-recipe/date prep (which gets a time-suffixed product name) is undone correctly (H-10 / theme T8). NULL for non-prep entries and for meal-prep entries completed before the migration — those fall back to best-effort bare-name matching on unmark.
 
 ### `chefbyte.food_logs` — notable column
 
-- `meal_id` UUID (FK → chefbyte.meal_plan_entries, nullable) — traceability link set when `mark_meal_done` creates food logs from a meal plan entry
+- `meal_id` UUID (FK → chefbyte.meal_plan_entries, nullable) — traceability link set when `mark_meal_done` creates food logs from a meal plan entry. As of migration 20260515100000, `mark_meal_done` tags **only the specific food_log ids** returned by its own `consume_product` calls (captured via the new `food_log_id` field in `consume_product`'s return JSONB), rather than `WHERE created_at = now()`, so an unrelated same-transaction food_log can no longer be over-tagged (H-14).
 
 ### `chefbyte.recipes` — notable column
 
