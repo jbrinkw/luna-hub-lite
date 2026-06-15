@@ -209,48 +209,70 @@ export function WalmartTab() {
       }));
       setProducts(initial);
 
-      // Fetch search results for each product in parallel via edge function
-      const enriched = await Promise.all(
-        initial.map(async (p) => {
-          try {
-            const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
-              body: { search_term: p.name },
-            });
+      // A5-06 audit: fetch search results SEQUENTIALLY and stop on the first
+      // quota/rate-limit (429) response. The previous Promise.all fired all 5
+      // scrape calls at once, so a near-exhausted quota still burned up to 5
+      // wasted calls before the server's rate-limit caught up. A sequential
+      // loop bails the moment handleQuotaResponse() flags a quota hit, leaving
+      // the not-yet-attempted cards labeled rather than firing doomed calls.
+      const enriched: ProductWithOptions[] = [...initial];
+      let hitQuota = false;
+      for (let i = 0; i < enriched.length; i++) {
+        const p = enriched[i];
+        try {
+          const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
+            body: { search_term: p.name },
+          });
 
-            // Update the quota counter from every successful call. If the
-            // server returned 429, surface that as the per-card error and
-            // skip parsing the (empty) results list.
-            if (handleQuotaResponse(data, fnError)) {
-              return { ...p, loading: false, error: 'Daily quota exceeded' };
-            }
-
-            if (fnError) throw new Error(fnError.message || 'Search failed');
-
-            const raw = data?.results || [];
-            // Deduplicate by URL — SerpApi can return the same product twice
-            const seen = new Set<string>();
-            const results = raw.filter((r: WalmartOption) => {
-              if (!r.url || seen.has(r.url)) return false;
-              seen.add(r.url);
-              return true;
-            });
-            return {
-              ...p,
-              options: results,
-              loading: false,
-              error: results.length === 0 ? 'No results found' : null,
-            };
-          } catch (err: any) {
-            return {
-              ...p,
-              loading: false,
-              error: err.message || 'Search failed',
-            };
+          // Update the quota counter from every call. If the server returned
+          // 429 / quota_exceeded, stop issuing further scrape calls.
+          if (handleQuotaResponse(data, fnError)) {
+            enriched[i] = { ...p, loading: false, error: 'Daily quota exceeded' };
+            hitQuota = true;
+            setProducts([...enriched]);
+            break;
           }
-        }),
-      );
 
-      setProducts(enriched);
+          if (fnError) throw new Error(fnError.message || 'Search failed');
+
+          const raw = data?.results || [];
+          // Deduplicate by URL — SerpApi can return the same product twice
+          const seen = new Set<string>();
+          const results = raw.filter((r: WalmartOption) => {
+            if (!r.url || seen.has(r.url)) return false;
+            seen.add(r.url);
+            return true;
+          });
+          enriched[i] = {
+            ...p,
+            options: results,
+            loading: false,
+            error: results.length === 0 ? 'No results found' : null,
+          };
+        } catch (err: any) {
+          enriched[i] = {
+            ...p,
+            loading: false,
+            error: err.message || 'Search failed',
+          };
+        }
+        setProducts([...enriched]);
+      }
+
+      // If we bailed early, clear the spinner on the cards we never reached
+      // and label them so the user knows they weren't searched.
+      if (hitQuota) {
+        for (let i = 0; i < enriched.length; i++) {
+          if (enriched[i].loading) {
+            enriched[i] = { ...enriched[i], loading: false, error: 'Skipped — daily quota exceeded' };
+          }
+        }
+        setProducts([...enriched]);
+        toast.show('Walmart search quota hit — remaining products were skipped. Try again tomorrow.', {
+          variant: 'error',
+          durationMs: 7000,
+        });
+      }
     } catch {
       setError('Failed to load products');
     } finally {

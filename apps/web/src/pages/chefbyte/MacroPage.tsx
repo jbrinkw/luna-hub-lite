@@ -368,9 +368,29 @@ export function MacroPage() {
         'full',
       ]);
       if (previous) {
+        // Locate the row being removed so we can subtract its macros from
+        // the RPC-summary totals (macros.consumed) that drive the
+        // top-of-page MacroProgressBar(s) + the "remaining" tile.
+        const removed = previous.consumed.find((c) => c.id === item.id);
         queryClient.setQueryData<MacroPageData>([...queryKeys.dailyMacros(userId!, currentDate), 'full'], {
           ...previous,
           consumed: previous.consumed.filter((c) => c.id !== item.id),
+          // A4-05 audit: the editQty mutation patches macros.consumed but the
+          // delete path did not, leaving the progress bars + remaining stale
+          // until the onSettled refetch landed. Mirror editQty and subtract
+          // the deleted item's macros so the bars animate down immediately.
+          macros:
+            previous.macros && removed
+              ? {
+                  ...previous.macros,
+                  consumed: {
+                    calories: Math.max(0, previous.macros.consumed.calories - removed.calories),
+                    protein: Math.max(0, previous.macros.consumed.protein - removed.protein),
+                    carbs: Math.max(0, previous.macros.consumed.carbs - removed.carbs),
+                    fat: Math.max(0, previous.macros.consumed.fat - removed.fat),
+                  },
+                }
+              : previous.macros,
         });
       }
       return { previous };

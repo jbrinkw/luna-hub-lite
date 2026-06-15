@@ -52,6 +52,13 @@ export function isLikelyWarmupSet(reps: number, load: number): boolean {
 
 export interface CompletedSet {
   completed_set_id: string;
+  /**
+   * The planned_set this completion reopens when deleted. A2-10 audit: the
+   * optimistic reopen previously matched by exercise_name, which flips the
+   * WRONG planned row when two sets share an exercise. Carrying the id lets
+   * us reopen the exact slot. May be null for legacy rows with no link.
+   */
+  planned_set_id: string | null;
   exercise_name: string;
   actual_reps: number;
   actual_load: number;
@@ -142,6 +149,7 @@ export async function loadDailyPlanData(day: string, client?: SupabaseClient<any
 
   const completedSets: CompletedSet[] = (completedData ?? []).map((cs: any) => ({
     completed_set_id: cs.completed_set_id,
+    planned_set_id: cs.planned_set_id ?? null,
     exercise_name: cs.exercises?.name ?? 'Unknown',
     actual_reps: cs.actual_reps,
     // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
@@ -483,6 +491,7 @@ export function TodayPage() {
 
       const optimisticSet: CompletedSet = {
         completed_set_id: `optimistic-${targetSet.planned_set_id}`,
+        planned_set_id: targetSet.planned_set_id,
         exercise_name: targetSet.exercise_name,
         actual_reps: reps,
         actual_load: load,
@@ -885,11 +894,14 @@ export function TodayPage() {
     const removed = (planData?.completedSets ?? []).find((cs) => cs.completed_set_id === completedSetId);
     const snapshot = optimisticUpdatePlanCache((prev) => {
       const remainingCompleted = prev.completedSets.filter((cs) => cs.completed_set_id !== completedSetId);
-      // Reverse the planned_set's `completed` flag for any planned set
-      // whose exercise_name matches the removed completed set AND was
-      // marked completed. Best-effort match — server reload reconciles.
+      // Reopen the EXACT planned slot this completion filled. A2-10 audit:
+      // matching by exercise_name flipped the wrong row when two sets share
+      // an exercise. Prefer the planned_set_id link; fall back to the
+      // exercise_name heuristic only for legacy rows with no link.
       const reopen = removed
-        ? prev.sets.findIndex((s) => s.completed && s.exercise_name === removed.exercise_name)
+        ? removed.planned_set_id
+          ? prev.sets.findIndex((s) => s.completed && s.planned_set_id === removed.planned_set_id)
+          : prev.sets.findIndex((s) => s.completed && s.exercise_name === removed.exercise_name)
         : -1;
       const sets = reopen >= 0 ? prev.sets.map((s, i) => (i === reopen ? { ...s, completed: false } : s)) : prev.sets;
       return { ...prev, sets, completedSets: remainingCompleted };

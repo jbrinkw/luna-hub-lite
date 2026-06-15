@@ -271,6 +271,50 @@ describe('MacroPage deleteMutation/editQtyMutation — onError rollback (real co
     expect(serverFoodLogs.some((r) => r.log_id === LOG_ID)).toBe(false);
   });
 
+  // A4-05: the delete optimistic onMutate must subtract the removed item's
+  // macros from macros.consumed (the RPC summary that drives the top-of-page
+  // MacroProgressBar(s) + the "remaining" tile) — not just drop the row.
+  // Before the fix, the bars + remaining stayed stale (300 cal / 1700 left)
+  // until the onSettled refetch landed; the per-row TOTAL updated but the
+  // bars did not. We gate the refetch so the optimistic patch is the ONLY
+  // thing that can move the bars within the assertion window.
+  it('deleteMutation: optimistically drops macros.consumed (bars + remaining) before refetch', async () => {
+    deleteShouldFail = false;
+    const qc = makeQc();
+    const user = userEvent.setup();
+    renderMacro(qc);
+
+    await screen.findByTestId(`consumed-row-${LOG_ID}`);
+
+    // Pre-delete: the calories bar reflects the consumed total (300) and the
+    // remaining tile shows goal - consumed = 2000 - 300 = 1700.
+    expect(screen.getByTestId('progress-calories')).toHaveTextContent('300 / 2000');
+    expect(screen.getByTestId('remaining-calories')).toHaveTextContent('1700');
+
+    // Delete (confirm not required on MacroPage delete) → optimistic onMutate.
+    await user.click(screen.getByTestId(`delete-consumed-${LOG_ID}`));
+
+    // Refetch is BLOCKED (gate not released) so only the optimistic patch can
+    // have moved the bars. The food-log row is gone AND macros.consumed has
+    // been decremented to 0 → bar shows 0, remaining shows the full goal.
+    // Pre-fix the bars stayed at 300 / 1700 here (only the row + TOTAL moved).
+    await waitFor(() => {
+      expect(screen.getByTestId('progress-calories')).toHaveTextContent('0 / 2000');
+    });
+    expect(screen.getByTestId('remaining-calories')).toHaveTextContent('2000');
+    // Protein/carbs/fat bars also zeroed (full macro subtraction, not just
+    // cals). These bars carry a 'g' unit suffix: "0g / 150g".
+    expect(screen.getByTestId('progress-protein')).toHaveTextContent('0g / 150g');
+    expect(screen.getByTestId('progress-carbs')).toHaveTextContent('0g / 200g');
+    expect(screen.getByTestId('progress-fats')).toHaveTextContent('0g / 65g');
+
+    // NOTE: we deliberately stop before releasing the refetch. The mocked
+    // get_daily_macros RPC is static (always returns consumed=300), so the
+    // onSettled reconciliation would reset the bars — which is correct server
+    // behavior but irrelevant to this finding. The gate above already proved
+    // the OPTIMISTIC patch (the A4-05 fix) moved the bars on its own.
+  });
+
   it('editQtyMutation: restores the original qty when update_food_log_qty rejects', async () => {
     editRpcShouldFail = true;
     const qc = makeQc();

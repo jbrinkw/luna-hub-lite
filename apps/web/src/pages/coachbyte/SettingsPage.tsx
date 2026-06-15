@@ -23,13 +23,42 @@ interface Exercise {
 }
 
 const DEFAULT_PLATES = [45, 35, 25, 10, 5, 2.5];
+const DEFAULT_REST_SECONDS = 90;
+const DEFAULT_BAR_WEIGHT_LBS = 45;
+
+/**
+ * Parse a numeric settings input, preserving an explicit 0.
+ *
+ * A2-09 audit: the inputs used `Number(value) || fallback`, which coerced a
+ * legitimate 0 (e.g. "no rest", "bar-only / bodyweight") back to the default
+ * because 0 is falsy. We instead parse the value and only fall back when it
+ * is empty or NaN (or negative, which the `min="0"` inputs disallow anyway).
+ * A real 0 is kept.
+ */
+function parseNonNegativeOrDefault(value: string, fallback: number): number {
+  const trimmed = value.trim();
+  if (trimmed === '') return fallback;
+  // parseFloat (not Number()): explicit numeric parse with a clear NaN failure
+  // mode for invalid input, which we then floor at 0 and fall back from.
+  const parsed = parseFloat(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return parsed;
+}
+
+export function parseRestInput(value: string): number {
+  return parseNonNegativeOrDefault(value, DEFAULT_REST_SECONDS);
+}
+
+export function parseWeightInput(value: string): number {
+  return parseNonNegativeOrDefault(value, DEFAULT_BAR_WEIGHT_LBS);
+}
 
 export function SettingsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [settings, setSettings] = useState<UserSettings>({
-    default_rest_seconds: 90,
-    bar_weight_lbs: 45,
+    default_rest_seconds: DEFAULT_REST_SECONDS,
+    bar_weight_lbs: DEFAULT_BAR_WEIGHT_LBS,
     available_plates: DEFAULT_PLATES,
   });
   const [searchText, setSearchText] = useState('');
@@ -179,7 +208,9 @@ export function SettingsPage() {
               type="number"
               min="0"
               value={settings.default_rest_seconds}
-              onChange={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.target.value) || 90 }))}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, default_rest_seconds: parseRestInput(e.target.value) }))
+              }
               onBlur={saveSettings}
               className="px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="default-rest-input"
@@ -199,7 +230,7 @@ export function SettingsPage() {
               type="number"
               min="0"
               value={settings.bar_weight_lbs}
-              onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.target.value) || 45 }))}
+              onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: parseWeightInput(e.target.value) }))}
               onBlur={saveSettings}
               className="px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="bar-weight-input"
