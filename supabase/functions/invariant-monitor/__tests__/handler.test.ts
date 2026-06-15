@@ -136,19 +136,88 @@ interface StubSpec {
   ) => Promise<Array<{ subject_id: string | null; user_id: string | null; details: Record<string, unknown> }>>;
 }
 
-// Minimal runMonitor implementation (matches index.ts logic exactly)
+// ─── Alert-write spy ──────────────────────────────────────────────────────────
+//
+// The OLD version of this stub never called upsert_alert and hard-coded
+// ok:true (handler.test.ts:150 — the false-pass the H-16 audit flagged: it
+// rubber-stamped a swallowed write failure and let the `.schema('private')`
+// PGRST106 bug ship). The stub now FAITHFULLY mirrors index.ts: it routes each
+// violation through an injected `upsertAlert` spy and reflects write failures
+// in `ok` / `write_failures` exactly like the production runner. Tests assert
+// (a) the write targets the EXPOSED `hub` schema and (b) a failing write is
+// surfaced, not rubber-stamped.
+
+interface UpsertCall {
+  schema: string;
+  fn: string;
+  args: Record<string, unknown>;
+}
+
+type UpsertResult = { error: { message: string; code?: string } | null };
+type UpsertSpy = (call: UpsertCall) => UpsertResult;
+
+interface MonitorResult {
+  name: string;
+  ok: boolean;
+  violation_count: number;
+  upserted: number;
+  write_failures?: number;
+  error?: string;
+}
+
+// Default spy: a healthy DB — every write succeeds. Records nothing.
+const SPY_OK: UpsertSpy = () => ({ error: null });
+
+// Minimal runMonitor implementation. Mirrors index.ts runMonitor logic exactly,
+// including the schema('hub').rpc('upsert_alert', …) call and the
+// write-failure → not-ok visibility contract added for H-16.
 async function runMonitorStub(
   specs: StubSpec[],
   supabase: unknown,
   filter: Set<string> | null,
-): Promise<Array<{ name: string; ok: boolean; violation_count: number; upserted: number; error?: string }>> {
-  const results = [];
+  upsertAlert: UpsertSpy = SPY_OK,
+): Promise<MonitorResult[]> {
+  const results: MonitorResult[] = [];
   for (const inv of specs) {
     if (filter && !filter.has(inv.name)) continue;
     try {
       const violations = await inv.check(supabase);
-      // Stub: don't call upsert_alert — just count.
-      results.push({ name: inv.name, ok: true, violation_count: violations.length, upserted: violations.length });
+      let upserted = 0;
+      let writeFailures = 0;
+      let firstWriteError: string | undefined;
+      for (const v of violations) {
+        // Mirror index.ts: ALWAYS the exposed `hub` schema, never `private`.
+        const { error: upErr } = upsertAlert({
+          schema: 'hub',
+          fn: 'upsert_alert',
+          args: {
+            p_invariant_name: inv.name,
+            p_severity: inv.severity,
+            p_subject_type: inv.subject_type,
+            p_subject_id: v.subject_id,
+            p_user_id: v.user_id,
+            p_details: v.details,
+          },
+        });
+        if (upErr) {
+          writeFailures += 1;
+          if (firstWriteError === undefined) firstWriteError = upErr.message;
+          continue;
+        }
+        upserted += 1;
+      }
+      results.push({
+        name: inv.name,
+        ok: writeFailures === 0,
+        violation_count: violations.length,
+        upserted,
+        ...(writeFailures > 0
+          ? {
+              write_failures: writeFailures,
+              error: `${writeFailures} alert write(s) failed (first: ${firstWriteError})`,
+            }
+          : {}),
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       results.push({ name: inv.name, ok: false, violation_count: 0, upserted: 0, error: msg });
@@ -230,6 +299,96 @@ Deno.test('runMonitor: one orphan-lot violation → violation_count=1, overallOk
   const totalViolations = results.reduce((n, r) => n + r.violation_count, 0);
   assertEquals(totalViolations, 1); // but one violation was detected
 });
+
+// ─── Scenario 5 (H-16): alert write targets the EXPOSED `hub` schema ──────────
+// The bug: index.ts called `.schema('private').rpc('upsert_alert')`, which
+// PostgREST rejects with PGRST106 (private isn't exposed) — so every alert was
+// dropped. The previous stub never called upsert at all, so it couldn't catch
+// this. Now we spy on the write and assert it routes through `hub` (NOT
+// `private`) with the violation's payload.
+Deno.test('runMonitor: alert write is attempted against the exposed `hub` schema (H-16 PGRST106 fix)', async () => {
+  const calls: UpsertCall[] = [];
+  const spy: UpsertSpy = (call) => {
+    calls.push(call);
+    return { error: null };
+  };
+
+  const specs: StubSpec[] = [
+    {
+      name: 'qty_non_negative',
+      severity: 'critical',
+      subject_type: 'stock_lot',
+      check: async (_sb) => [{ subject_id: 'lot-1', user_id: 'user-1', details: { qty_containers: -3 } }],
+    },
+  ];
+
+  const results = await runMonitorStub(specs, {}, null, spy);
+
+  // The write was actually attempted (the old stub never called it).
+  assertEquals(calls.length, 1);
+  // Targets the exposed schema — NOT `private` (which would PGRST106).
+  assertEquals(calls[0].schema, 'hub');
+  assertEquals(calls[0].schema === 'private', false);
+  assertEquals(calls[0].fn, 'upsert_alert');
+  // The full violation payload is forwarded.
+  assertEquals(calls[0].args.p_invariant_name, 'qty_non_negative');
+  assertEquals(calls[0].args.p_severity, 'critical');
+  assertEquals(calls[0].args.p_subject_type, 'stock_lot');
+  assertEquals(calls[0].args.p_subject_id, 'lot-1');
+  assertEquals(calls[0].args.p_user_id, 'user-1');
+  assertEquals((calls[0].args.p_details as Record<string, unknown>).qty_containers, -3);
+
+  // Healthy write → invariant is ok with one row upserted.
+  assertEquals(results[0].ok, true);
+  assertEquals(results[0].upserted, 1);
+  assertEquals(results[0].write_failures, undefined);
+});
+
+// ─── Scenario 6 (H-16): a FAILING alert write is surfaced, NOT rubber-stamped ─
+// The audit's core complaint: the old code swallowed upsert errors and still
+// reported ok:true, so the backstop could silently break (as it had). The
+// monitor must now flip the invariant (and thus the run's top-level ok) to
+// false and report write_failures when a write fails — making the seam loud.
+Deno.test(
+  'runMonitor: a failing alert write flips ok=false and reports write_failures (no silent swallow)',
+  async () => {
+    // Simulate exactly the shipped bug: PostgREST rejecting the write.
+    const spyPGRST106: UpsertSpy = () => ({
+      error: { message: 'Invalid schema: private', code: 'PGRST106' },
+    });
+
+    const specs: StubSpec[] = [
+      {
+        name: 'qty_non_negative',
+        severity: 'critical',
+        subject_type: 'stock_lot',
+        check: async (_sb) => [
+          { subject_id: 'lot-1', user_id: 'user-1', details: { qty_containers: -3 } },
+          { subject_id: 'lot-2', user_id: 'user-2', details: { qty_containers: -8 } },
+        ],
+      },
+    ];
+
+    const results = await runMonitorStub(specs, {}, null, spyPGRST106);
+
+    assertEquals(results.length, 1);
+    // The violation was detected …
+    assertEquals(results[0].violation_count, 2);
+    // … but nothing persisted …
+    assertEquals(results[0].upserted, 0);
+    // … and that is NOT rubber-stamped ok:true (the false-pass the old stub had).
+    assertEquals(results[0].ok, false);
+    assertEquals(results[0].write_failures, 2);
+    // The error string carries the underlying cause for the logs / response.
+    assertEquals(typeof results[0].error, 'string');
+    assertEquals(results[0].error?.includes('Invalid schema: private'), true);
+
+    // Top-level run ok (results.every(r => r.ok)) is now false → visible to the
+    // cron caller and function logs instead of a silent ok:true.
+    const overallOk = results.every((r) => r.ok);
+    assertEquals(overallOk, false);
+  },
+);
 
 // ─── Scenario 3: filter by invariant name ────────────────────────────────────
 

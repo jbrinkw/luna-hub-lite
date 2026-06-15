@@ -12,7 +12,10 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  *     monitor. Body may include `{ "invariants": ["qty_non_negative"] }`
  *     to run only a subset (used by tests + manual debugging).
  *
- * Idempotency: each violation is written via `private.upsert_alert`
+ * Idempotency: each violation is written via `hub.upsert_alert` (a
+ * service-role-only SECURITY DEFINER wrapper over `private.upsert_alert`;
+ * the monitor MUST call the exposed `hub` schema, not `private`, or
+ * PostgREST rejects it with PGRST106 and drops the alert — see H-16)
  * which uses a `dedup_key = md5(invariant + subject_type + subject_id)`
  * partial-unique-on-unacked index. A persistent violation that survives
  * across cron ticks bumps `details.last_seen_at` + `seen_count` instead
@@ -556,6 +559,8 @@ interface InvariantResult {
   ok: boolean;
   violation_count: number;
   upserted: number;
+  /** Number of detected violations whose alert-write (upsert_alert) failed. */
+  write_failures?: number;
   error?: string;
 }
 
@@ -566,8 +571,17 @@ async function runMonitor(supabase: SupabaseClient, filter: Set<string> | null):
     try {
       const violations = await inv.check(supabase);
       let upserted = 0;
+      let writeFailures = 0;
+      let firstWriteError: string | undefined;
       for (const v of violations) {
-        const { error: upErr } = await (supabase as any).schema('private').rpc('upsert_alert', {
+        // Call through the EXPOSED `hub` schema, NOT `private`. PostgREST
+        // exposes only (public, graphql_public, hub, coachbyte, chefbyte)
+        // per config.toml — a `.schema('private').rpc(...)` is rejected
+        // with PGRST106 ("Invalid schema: private") BEFORE any grant check,
+        // which silently black-holed every alert (H-16). hub.upsert_alert
+        // is a service-role-only SECURITY DEFINER wrapper that delegates to
+        // private.upsert_alert (migration 20260515060000).
+        const { error: upErr } = await (supabase as any).schema('hub').rpc('upsert_alert', {
           p_invariant_name: inv.name,
           p_severity: inv.severity,
           p_subject_type: inv.subject_type,
@@ -577,11 +591,19 @@ async function runMonitor(supabase: SupabaseClient, filter: Set<string> | null):
         });
         if (upErr) {
           // Don't abort the whole run on a single insert failure — log
-          // + carry on. The next tick will retry naturally.
-          console.error('invariant-monitor: upsert_alert failed', {
+          // + carry on. The next tick will retry naturally. But DO surface
+          // it: an alert-write failure means the data-corruption backstop
+          // is dropping violations on the floor. We count failures and
+          // reflect them in `ok` + the result row so a future regression of
+          // this seam (the H-16 PGRST106 class) is loud, not silent.
+          writeFailures += 1;
+          if (firstWriteError === undefined) firstWriteError = upErr.message;
+          console.error('invariant-monitor: upsert_alert WRITE FAILED — alert dropped', {
             invariant: inv.name,
             subject_id: v.subject_id,
             error: upErr.message,
+            code: (upErr as any).code,
+            hint: 'alerts are not being persisted — the data-corruption backstop is inert',
           });
           continue;
         }
@@ -589,9 +611,19 @@ async function runMonitor(supabase: SupabaseClient, filter: Set<string> | null):
       }
       results.push({
         name: inv.name,
-        ok: true,
+        // A detected violation that could not be written is a failure of the
+        // monitor's whole purpose — mark the invariant not-ok so the run's
+        // top-level `ok` flips false and the failure is visible to whoever
+        // reads the response / function logs.
+        ok: writeFailures === 0,
         violation_count: violations.length,
         upserted,
+        ...(writeFailures > 0
+          ? {
+              write_failures: writeFailures,
+              error: `${writeFailures} alert write(s) failed (first: ${firstWriteError})`,
+            }
+          : {}),
       });
     } catch (err: any) {
       console.error('invariant-monitor: check failed', {

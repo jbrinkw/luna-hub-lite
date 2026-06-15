@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(20);
 
 -- Grants are transaction-scoped (pgTAP rolls back after finish()).
 -- service_role needs USAGE on the tests schema to call
@@ -170,6 +170,81 @@ SELECT ok(
        AND indexname = 'alerts_unacked_idx'
   ),
   'alerts_unacked_idx partial index is present'
+);
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- H-16 — hub.upsert_alert PostgREST-callable wrapper
+-- ════════════════════════════════════════════════════════════════════════════
+-- The invariant-monitor edge function reaches PostgREST under the SERVICE_ROLE
+-- key. PostgREST exposes only (public, graphql_public, hub, coachbyte, chefbyte)
+-- — NOT `private` — so supabase-js's `.schema('private').rpc('upsert_alert')`
+-- is rejected with PGRST106 ("Invalid schema: private") BEFORE any grant check,
+-- and every detected violation was silently dropped (hub.alerts stayed empty).
+-- The fix mirrors the walmart / execute_scan_action / void_scan_transaction
+-- precedent: a thin SECURITY DEFINER wrapper in the EXPOSED `hub` schema that
+-- delegates to private.upsert_alert. The monitor calls .schema('hub').rpc(...).
+--
+-- RED (pre-fix): hub.upsert_alert(...) does not exist → every assertion below
+--   errors / fails.
+-- GREEN (post-fix): the wrapper exists, inserts/dedups identically to the
+--   private fn, and is locked to service_role only (clients must NEVER write
+--   alerts — there is intentionally no INSERT RLS policy, and SECURITY DEFINER
+--   would bypass RLS anyway).
+
+-- Test 14: the exposed hub.upsert_alert wrapper INSERTS a new alert row — this
+-- is the assertion that proves the monitor's writes now actually land. We call
+-- as service_role (the monitor's identity).
+SET LOCAL role = service_role;
+DO $$ BEGIN
+  PERFORM hub.upsert_alert(
+    'wrapper_invariant', 'critical', 'stock_lot', 'wrap-lot-1',
+    tests.get_supabase_uid('alerts_user'), '{"qty_containers": -7}'::jsonb
+  );
+END $$;
+SELECT is(
+  (SELECT count(*)::integer FROM hub.alerts WHERE invariant_name = 'wrapper_invariant'),
+  1,
+  'hub.upsert_alert wrapper inserts a new alert row (PGRST106 fix — alerts now land)'
+);
+
+-- Test 15: the wrapper persisted the supplied details + user attribution.
+SELECT is(
+  (SELECT (details->>'qty_containers') FROM hub.alerts WHERE invariant_name = 'wrapper_invariant' LIMIT 1),
+  '-7',
+  'hub.upsert_alert wrapper persists the supplied details payload'
+);
+
+-- Test 16: the wrapper dedups exactly like the private fn — a second call with
+-- the same (invariant, subject_type, subject_id) bumps the existing unack row.
+DO $$ BEGIN
+  PERFORM hub.upsert_alert(
+    'wrapper_invariant', 'critical', 'stock_lot', 'wrap-lot-1',
+    tests.get_supabase_uid('alerts_user'), '{"qty_containers": -9}'::jsonb
+  );
+END $$;
+SELECT is(
+  (SELECT count(*)::integer FROM hub.alerts WHERE invariant_name = 'wrapper_invariant'),
+  1,
+  'hub.upsert_alert wrapper bumps the existing unack row instead of inserting twice'
+);
+RESET role;
+
+-- Test 17: service_role (the monitor) HAS EXECUTE on the wrapper.
+SELECT ok(
+  has_function_privilege('service_role', 'hub.upsert_alert(text,text,text,text,uuid,jsonb)', 'EXECUTE'),
+  'hub.upsert_alert: service_role HAS EXECUTE (the monitor can write)'
+);
+
+-- Test 18: authenticated must NOT have EXECUTE — clients never write alerts.
+SELECT ok(
+  NOT has_function_privilege('authenticated', 'hub.upsert_alert(text,text,text,text,uuid,jsonb)', 'EXECUTE'),
+  'hub.upsert_alert: authenticated must NOT have EXECUTE (clients never write alerts)'
+);
+
+-- Test 19: anon must NOT have EXECUTE either.
+SELECT ok(
+  NOT has_function_privilege('anon', 'hub.upsert_alert(text,text,text,text,uuid,jsonb)', 'EXECUTE'),
+  'hub.upsert_alert: anon must NOT have EXECUTE'
 );
 
 -- Cleanup
