@@ -1,134 +1,303 @@
 /**
- * onError rollback: MealPlanPage markDoneMutation + unmarkDoneMutation.
+ * onError rollback — MealPlanPage markDone/unmarkDone mutations (REAL component).
  *
- * mark_meal_done / unmark_meal_done RPC fails → mealPlan cache restored.
- * These mutations have complex onMutate (completing a meal also seeds a
- * food_logs entry in the cache); onError must restore the full snapshot.
+ * Drives the SHIPPED `MealPlanPage` optimistic mark-done / undo-done
+ * mutations, not in-file copies. We render the real page, let its
+ * `useQuery` load a week of meals (one per weekday so whichever day the
+ * page auto-selects has a meal), and:
+ *   - markDone: click "Mark Done", force the `mark_meal_done` RPC to
+ *     reject, assert the "Done" badge reverts (meal returns to pending).
+ *   - unmarkDone: start from a completed meal, click "Undo", force the
+ *     `unmark_meal_done` RPC to reject, assert the meal stays completed.
+ *
+ * Production onMutate flips `completed_at` AND seeds/removes a synthetic
+ * food_log; onError must restore the whole `context.previous` snapshot.
+ *
+ * The `onSettled` invalidation refetch is gated by the test so the
+ * synchronous onError rollback is the ONLY path that can revert within
+ * the assertion window. Deleting the production rollback leaves the meal
+ * stuck in the optimistic state → these tests go RED.
+ *
+ * Only the Supabase transport is mocked.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/shared/queryKeys';
-
-vi.mock('@/shared/supabase', () => ({ chefbyte: vi.fn(), supabase: { channel: vi.fn() } }));
-vi.mock('@/shared/auth/AuthProvider', () => ({ useAuth: () => ({ user: { id: 'u1' } }) }));
-vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi.fn() }));
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const USER_ID = 'user-mealplan-rollback';
-const START_DATE = '2026-04-30';
 
-interface MealEntry {
+interface MealRow {
   meal_id: string;
-  completed_at: string | null;
+  user_id: string;
+  recipe_id: string | null;
+  product_id: string | null;
+  logical_date: string;
   servings: number;
-}
-interface FoodLogEntry {
-  log_id: string;
-}
-interface MealPlanData {
-  meals: MealEntry[];
-  foodLogs: FoodLogEntry[];
+  meal_prep: boolean;
+  meal_type: string | null;
+  completed_at: string | null;
+  recipes: null;
+  products: {
+    name: string;
+    calories_per_serving: number;
+    carbs_per_serving: number;
+    protein_per_serving: number;
+    fat_per_serving: number;
+  };
 }
 
-function makeMarkDoneHandlers(qc: QueryClient) {
-  const key = queryKeys.mealPlan(USER_ID, START_DATE);
+function makeMeal(id: string, logicalDate: string, completed: boolean): MealRow {
   return {
-    onMutate: async (mealId: string) => {
-      await qc.cancelQueries({ queryKey: key });
-      const previous = qc.getQueryData<MealPlanData>(key);
-      if (previous) {
-        qc.setQueryData<MealPlanData>(key, {
-          ...previous,
-          meals: previous.meals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: '2026-04-30T12:00:00Z' } : m)),
-          foodLogs: [...previous.foodLogs, { log_id: `optimistic-${mealId}` }],
-        });
-      }
-      return { previous };
-    },
-    onError: (_err: unknown, _mealId: string, context: { previous?: MealPlanData } | undefined) => {
-      if (context?.previous) qc.setQueryData(key, context.previous);
+    meal_id: id,
+    user_id: USER_ID,
+    recipe_id: null,
+    product_id: 'prod-1',
+    logical_date: logicalDate,
+    servings: 1,
+    meal_prep: false,
+    meal_type: 'dinner',
+    completed_at: completed ? '2026-04-30T18:00:00Z' : null,
+    recipes: null,
+    products: {
+      name: 'Test Chicken',
+      calories_per_serving: 200,
+      carbs_per_serving: 0,
+      protein_per_serving: 40,
+      fat_per_serving: 5,
     },
   };
 }
 
-function makeUnmarkDoneHandlers(qc: QueryClient) {
-  const key = queryKeys.mealPlan(USER_ID, START_DATE);
-  return {
-    onMutate: async (mealId: string) => {
-      await qc.cancelQueries({ queryKey: key });
-      const previous = qc.getQueryData<MealPlanData>(key);
-      if (previous) {
-        qc.setQueryData<MealPlanData>(key, {
-          ...previous,
-          meals: previous.meals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: null } : m)),
-          foodLogs: previous.foodLogs.filter((l) => l.log_id !== `optimistic-${mealId}`),
-        });
-      }
-      return { previous };
-    },
-    onError: (_err: unknown, _mealId: string, context: { previous?: MealPlanData } | undefined) => {
-      if (context?.previous) qc.setQueryData(key, context.previous);
-    },
-  };
+// Server state, keyed by meal_id.
+let serverMeals: MealRow[] = [];
+
+let rpcShouldFail = false;
+let failingRpc: 'mark_meal_done' | 'unmark_meal_done' | null = null;
+
+// Refetch gate on the meal_plan_entries week query.
+let mealSelectCount = 0;
+let releaseRefetch!: (rows: MealRow[]) => void;
+let refetchGate: Promise<MealRow[]>;
+function armRefetchGate() {
+  refetchGate = new Promise((resolve) => {
+    releaseRefetch = resolve;
+  });
 }
 
-describe('MealPlanPage markDoneMutation — onError rollback', () => {
-  let qc: QueryClient;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  });
-
-  it('restores completed_at=null and removes optimistic food_log on failure', async () => {
-    const initial: MealPlanData = {
-      meals: [{ meal_id: 'm1', completed_at: null, servings: 1 }],
-      foodLogs: [],
-    };
-    qc.setQueryData(queryKeys.mealPlan(USER_ID, START_DATE), initial);
-
-    const { onMutate, onError } = makeMarkDoneHandlers(qc);
-    const ctx = await onMutate('m1');
-    // Optimistic
-    const mid = qc.getQueryData<MealPlanData>(queryKeys.mealPlan(USER_ID, START_DATE))!;
-    expect(mid.meals[0].completed_at).not.toBeNull();
-    expect(mid.foodLogs.some((l) => l.log_id === 'optimistic-m1')).toBe(true);
-
-    onError(new Error('rpc failed'), 'm1', ctx);
-    // Rolled back
-    const after = qc.getQueryData<MealPlanData>(queryKeys.mealPlan(USER_ID, START_DATE))!;
-    expect(after.meals[0].completed_at).toBeNull();
-    expect(after.foodLogs.some((l) => l.log_id === 'optimistic-m1')).toBe(false);
-  });
-
-  it('is a no-op when context.previous is undefined', () => {
-    const { onError } = makeMarkDoneHandlers(qc);
-    expect(() => onError(new Error('fail'), 'm1', undefined)).not.toThrow();
-  });
+vi.mock('@/shared/supabase', () => {
+  const chefbyte = () => {
+    const root: any = {};
+    root.rpc = vi.fn((name: string) => {
+      if ((name === 'mark_meal_done' || name === 'unmark_meal_done') && rpcShouldFail && name === failingRpc) {
+        return Promise.resolve({ data: null, error: { message: `${name} failed` } });
+      }
+      if (name === 'mark_meal_done') {
+        return Promise.resolve({ data: { partials: [] }, error: null });
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    root.from = vi.fn((table: string) => {
+      const resolveFor = (resolve: (v: any) => void, reject?: (e: unknown) => void) => {
+        if (table === 'meal_plan_entries') {
+          mealSelectCount += 1;
+          if (mealSelectCount === 1) {
+            resolve({ data: serverMeals, error: null });
+          } else {
+            refetchGate.then((rows) => resolve({ data: rows, error: null })).catch(reject);
+          }
+          return;
+        }
+        // food_logs, temp_items, user_config, shelf_event_log, products → empty.
+        resolve({ data: [], error: null, count: 0 });
+      };
+      const b: any = new Proxy(
+        {},
+        {
+          get(_t, prop) {
+            if (prop === 'then') {
+              return (resolve: (v: any) => void, reject?: (e: unknown) => void) => resolveFor(resolve, reject);
+            }
+            return () => b;
+          },
+        },
+      );
+      return b;
+    });
+    return root;
+  };
+  return {
+    supabase: {
+      channel: vi.fn(() => ({ on: vi.fn().mockReturnThis(), subscribe: vi.fn(), unsubscribe: vi.fn() })),
+      removeChannel: vi.fn(),
+    },
+    chefbyte,
+    coachbyte: vi.fn(),
+    escapeIlike: (s: string) => s,
+  };
 });
 
-describe('MealPlanPage unmarkDoneMutation — onError rollback', () => {
-  let qc: QueryClient;
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: USER_ID, email: 't@t.com' }, loading: false, signOut: vi.fn() }),
+}));
 
+vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi.fn() }));
+
+import { MealPlanPage } from '@/pages/chefbyte/MealPlanPage';
+import { getMonday } from '@/pages/chefbyte/MealPlanPage';
+import { toDateStr } from '@/shared/dates';
+import { ThemeProvider } from '@/shared/ThemeProvider';
+
+/** The 7 day-strings the page computes for the current displayed week. We
+ *  seed a meal on EACH so whichever day the page auto-selects (today's
+ *  logical date) renders one — making the test independent of the host
+ *  timezone vs NY-profile week boundary. */
+function weekDayStrings(): string[] {
+  const weekStart = getMonday(new Date());
+  return Array.from({ length: 7 }, (_, i) => toDateStr(new Date(weekStart.getTime() + i * 86400000)));
+}
+
+function renderMealPlan(qc: QueryClient) {
+  return render(
+    <QueryClientProvider client={qc}>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={['/chef/meal-plan']}>
+          <MealPlanPage />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function makeQc() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime: Infinity, gcTime: Infinity },
+      mutations: { retry: false },
+    },
+  });
+}
+
+/** Find the single rendered meal_id by locating whichever mark-done or
+ *  undo-done button exists in the auto-selected day. */
+function findRenderedMealId(prefix: 'mark-done-' | 'undo-done-'): string {
+  const btns = screen.getAllByTestId(new RegExp(`^${prefix}`));
+  const id = btns[0].getAttribute('data-testid')!.slice(prefix.length);
+  return id;
+}
+
+describe('MealPlanPage markDone/unmarkDone — onError rollback (real component)', () => {
   beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    rpcShouldFail = false;
+    failingRpc = null;
+    mealSelectCount = 0;
+    armRefetchGate();
   });
 
-  it('restores completed_at and re-inserts food_log on failure', async () => {
-    const initial: MealPlanData = {
-      meals: [{ meal_id: 'm1', completed_at: '2026-04-30T12:00:00Z', servings: 1 }],
-      foodLogs: [{ log_id: 'real-log-1' }],
-    };
-    qc.setQueryData(queryKeys.mealPlan(USER_ID, START_DATE), initial);
+  afterEach(() => {
+    releaseRefetch?.(serverMeals);
+    vi.clearAllMocks();
+  });
 
-    const { onMutate, onError } = makeUnmarkDoneHandlers(qc);
-    const ctx = await onMutate('m1');
-    // Optimistic: completed_at cleared
-    const mid = qc.getQueryData<MealPlanData>(queryKeys.mealPlan(USER_ID, START_DATE))!;
-    expect(mid.meals[0].completed_at).toBeNull();
+  it('markDone: reverts the Done badge when mark_meal_done RPC rejects', async () => {
+    // Seed one pending meal per weekday.
+    serverMeals = weekDayStrings().map((d, i) => makeMeal(`pend-${i}`, d, false));
+    rpcShouldFail = true;
+    failingRpc = 'mark_meal_done';
 
-    onError(new Error('fail'), 'm1', ctx);
-    // Rolled back
-    const after = qc.getQueryData<MealPlanData>(queryKeys.mealPlan(USER_ID, START_DATE))!;
-    expect(after.meals[0].completed_at).toBe('2026-04-30T12:00:00Z');
-    expect(after.foodLogs.some((l) => l.log_id === 'real-log-1')).toBe(true);
+    const qc = makeQc();
+    const user = userEvent.setup();
+    renderMealPlan(qc);
+
+    // Wait for a Mark Done button to appear in the auto-selected day.
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^mark-done-/).length).toBeGreaterThan(0);
+    });
+    const mealId = findRenderedMealId('mark-done-');
+
+    // No "Done" badge before.
+    expect(screen.queryByTestId(`done-badge-${mealId}`)).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId(`mark-done-${mealId}`));
+
+    // onMutate flips completed_at (Done badge appears), RPC rejects, onError
+    // reverts. Refetch BLOCKED → rollback is the only restorer.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Rolled back: the meal is pending again (Mark Done button present, no Done badge).
+    await waitFor(() => {
+      expect(screen.getByTestId(`mark-done-${mealId}`)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId(`done-badge-${mealId}`)).not.toBeInTheDocument();
+
+    releaseRefetch(serverMeals);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByTestId(`mark-done-${mealId}`)).toBeInTheDocument();
+  });
+
+  it('markDone: success keeps the meal done (success-path control)', async () => {
+    serverMeals = weekDayStrings().map((d, i) => makeMeal(`pend-${i}`, d, false));
+    rpcShouldFail = false;
+
+    const qc = makeQc();
+    const user = userEvent.setup();
+    renderMealPlan(qc);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^mark-done-/).length).toBeGreaterThan(0);
+    });
+    const mealId = findRenderedMealId('mark-done-');
+
+    await user.click(screen.getByTestId(`mark-done-${mealId}`));
+
+    // Reflect the completion server-side, then release the refetch.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      serverMeals = serverMeals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: '2026-04-30T18:00:00Z' } : m));
+      releaseRefetch(serverMeals);
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    // Stays done: the Undo button is present.
+    await waitFor(() => {
+      expect(screen.getByTestId(`undo-done-${mealId}`)).toBeInTheDocument();
+    });
+  });
+
+  it('unmarkDone: reverts to completed when unmark_meal_done RPC rejects', async () => {
+    // Seed one COMPLETED meal per weekday.
+    serverMeals = weekDayStrings().map((d, i) => makeMeal(`done-${i}`, d, true));
+    rpcShouldFail = true;
+    failingRpc = 'unmark_meal_done';
+
+    const qc = makeQc();
+    const user = userEvent.setup();
+    renderMealPlan(qc);
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^undo-done-/).length).toBeGreaterThan(0);
+    });
+    const mealId = findRenderedMealId('undo-done-');
+
+    // Done badge present before.
+    expect(screen.getByTestId(`done-badge-${mealId}`)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId(`undo-done-${mealId}`));
+
+    // onMutate clears completed_at (Undo→Mark Done), RPC rejects, onError reverts.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    // Rolled back: meal completed again (Undo button + Done badge present).
+    await waitFor(() => {
+      expect(screen.getByTestId(`undo-done-${mealId}`)).toBeInTheDocument();
+    });
+    expect(screen.getByTestId(`done-badge-${mealId}`)).toBeInTheDocument();
   });
 });
