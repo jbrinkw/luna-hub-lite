@@ -9,7 +9,7 @@
 --      on the next call.
 
 BEGIN;
-SELECT plan(19);
+SELECT plan(24);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup — user, products, activation (activate_app seeds the Fridge location)
@@ -211,6 +211,77 @@ SELECT is(
     WHERE cart_item_id = '40000000-0000-0000-0000-00000000000F'),
   NULL::timestamptz,
   'non-purchased rows are never stamped with imported_at'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- A3-03 — adding a deficit onto an ALREADY-IMPORTED row must re-surface
+-- it in the active cart (imported_at IS NULL). Drives the structural
+-- writer chefbyte.add_to_shopping_admin (the CHEFBYTE_add_to_shopping MCP
+-- RPC). Pre-fix the upsert only bumped qty and left imported_at set, so the
+-- re-added item stayed hidden — the hidden-row sibling of the stock_lots
+-- ghost bug, on a different table.
+-- ─────────────────────────────────────────────────────────────
+
+-- Capture the uid into a psql var so the assertions don't depend on the
+-- current role (we switch to service_role for the RPC call below).
+SELECT tests.get_supabase_uid('shop_imp') AS _imp_uid \gset
+
+-- Almond Butter (product …001) was imported in round 1 above, so its
+-- shopping row is currently hidden (imported_at IS NOT NULL, purchased=true).
+-- Precondition: confirm it is hidden before we re-add to it.
+SELECT is(
+  (SELECT count(*)::int FROM chefbyte.shopping_list
+    WHERE user_id = :'_imp_uid'::uuid
+      AND product_id = '30000000-0000-0000-0000-000000000001'
+      AND imported_at IS NOT NULL),
+  1,
+  'A3-03 precondition — Almond Butter shopping row is imported (hidden)'
+);
+
+-- Re-add 2 containers via the admin RPC. This is a service_role-only MCP
+-- wrapper (REVOKEd from authenticated by the T2 lockdown), so we call it under
+-- service_role exactly as the MCP worker does. auth.uid() is NULL under
+-- service_role — the legit caller identity the guard lets pass an arbitrary
+-- p_user_id.
+SELECT tests.clear_authentication();
+SET LOCAL role service_role;
+SELECT lives_ok(
+  format(
+    $q$ SELECT chefbyte.add_to_shopping_admin(%L::uuid,
+          '30000000-0000-0000-0000-000000000001'::uuid, 2::numeric) $q$,
+    :'_imp_uid'
+  ),
+  'A3-03 — add_to_shopping_admin onto an imported row succeeds'
+);
+RESET role;
+SELECT tests.authenticate_as('shop_imp');
+
+-- The row must re-appear in the ACTIVE cart: imported_at cleared to NULL.
+SELECT is(
+  (SELECT imported_at FROM chefbyte.shopping_list
+    WHERE user_id = :'_imp_uid'::uuid
+      AND product_id = '30000000-0000-0000-0000-000000000001'),
+  NULL::timestamptz,
+  'A3-03 — re-adding onto an imported row resets imported_at to NULL (re-surfaces in cart)'
+);
+
+-- And it is un-bought again (you still need to buy it).
+SELECT is(
+  (SELECT purchased FROM chefbyte.shopping_list
+    WHERE user_id = :'_imp_uid'::uuid
+      AND product_id = '30000000-0000-0000-0000-000000000001'),
+  false,
+  'A3-03 — re-adding onto an imported row resets purchased to false'
+);
+
+-- Qty accumulated onto the existing row (1 imported earlier + 2 added = 3),
+-- proving the merge still happens in-place (single row, no duplicate).
+SELECT is(
+  (SELECT qty_containers::numeric FROM chefbyte.shopping_list
+    WHERE user_id = :'_imp_uid'::uuid
+      AND product_id = '30000000-0000-0000-0000-000000000001'),
+  3::numeric,
+  'A3-03 — qty is additive on the same row (1 + 2 = 3), no duplicate cart row'
 );
 
 SELECT * FROM finish();

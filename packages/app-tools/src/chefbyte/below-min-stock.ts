@@ -81,11 +81,18 @@ export const belowMinStock: ToolDefinition = {
         existingMap[item.product_id] = Number(item.qty_containers);
       }
 
-      // Build rows with additive quantities
+      // Build rows with additive quantities. Reset imported_at (+ purchased)
+      // so a deficit added onto an already-imported row re-surfaces in the
+      // active To-Buy cart (the UI filters WHERE imported_at IS NULL). Without
+      // this, the upsert lands on the hidden imported row and the deficit is
+      // silently invisible — the A3-03 hidden-row sibling of the stock_lots
+      // ghost bug (different table, so the stock_lots trigger does not cover it).
       const rows = belowMin.map((item) => ({
         user_id: ctx.userId,
         product_id: item.product_id,
         qty_containers: (existingMap[item.product_id] || 0) + item.deficit,
+        imported_at: null,
+        purchased: false,
       }));
 
       const { error: upsertError } = await ctx.supabase

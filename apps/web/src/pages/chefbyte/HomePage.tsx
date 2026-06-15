@@ -663,6 +663,12 @@ export function HomePage() {
             product_id: productId,
             qty_containers: roundedQty,
             purchased: false,
+            // Reset imported_at so syncing a meal-plan deficit onto an
+            // already-imported row re-surfaces it in the active cart (the cart
+            // filters WHERE imported_at IS NULL). Without this the upsert lands
+            // on the hidden imported row and the synced item is invisible —
+            // the A3-03 hidden-row sibling of the stock_lots ghost bug.
+            imported_at: null,
           },
           { onConflict: 'user_id,product_id' },
         );

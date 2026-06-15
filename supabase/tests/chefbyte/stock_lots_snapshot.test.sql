@@ -76,8 +76,16 @@ INSERT INTO chefbyte.stock_lots (
 
 -- ─── Soft-delete under RLS ───────────────────────────────────────
 -- The owner can soft-delete their own lot (trigger fires, row stays).
+-- A real soft-delete zeroes qty_containers alongside setting deleted_at —
+-- that is the shape every production writer uses (consume_product, the G1
+-- hard-delete guard, unmark_meal_done). The T1 revive-invariant trigger
+-- (migration 20260515030000) forbids the qty>0 + deleted_at state, so a
+-- tombstone MUST carry qty=0 — setting deleted_at on a qty>0 row would be
+-- auto-reverted by the trigger (that is exactly the ghost-stock state it
+-- exists to prevent).
 UPDATE chefbyte.stock_lots
-   SET deleted_at = now()
+   SET qty_containers = 0,
+       deleted_at     = now()
  WHERE lot_id = :'_owner_lot'::uuid;
 
 -- ─── RLS: cross-user soft-delete is a no-op ──────────────────────

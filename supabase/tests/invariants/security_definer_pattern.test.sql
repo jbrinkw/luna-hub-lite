@@ -41,6 +41,13 @@ INSERT INTO _sec_allowlist VALUES
     'prevent the Pi cloud↔Pi ghost-row class. Runs as table owner; '
     'reads transaction-local GUC for bypass. No user input, no '
     'escalation — SECURITY INVOKER is correct.'),
+  ('private.stock_lots_revive_on_positive_qty()',
+    'BEFORE INSERT OR UPDATE trigger helper for chefbyte.stock_lots (T1 '
+    'ghost-stock fix, migration 20260515030000). Auto-clears deleted_at when '
+    'qty_containers > 0 so a merge onto a tombstone revives the lot in place. '
+    'Runs as table owner on every DML; only inspects/mutates the NEW record, '
+    'no user input, no escalation — SECURITY INVOKER is correct (matches '
+    'set_stock_lots_updated_at).'),
   ('private.now_with_freeze()',
     'Read-only helper for L7 clock-freeze harness. Returns coalesce('
     'current_setting(''app.frozen_now'', true)::timestamptz, now()). '

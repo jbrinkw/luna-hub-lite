@@ -602,6 +602,175 @@ def test_g2_tombstone_path_still_flags_lost(conn, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# T1 cloud-tombstone → REVIVE resurrection (deep audit 2026-06-03).
+#
+# The cloud-side T1 fix (migration 20260515030000) revives a tombstoned
+# stock_lots row IN PLACE: same lot_id, deleted_at flips set → NULL, qty>0.
+# A merge writer (import_shopping), or the live_scale claim, can do this to a
+# lot the Pi already saw tombstoned. The Pi's lot_snapshot poller receives the
+# delta as two ticks against the SAME lot_id:
+#
+#   tick 1 (tombstone, deleted_at set):
+#     * DELETE the cloud_lots mirror row.
+#     * flag the matching Pi physical `lots` row to 'lost'.
+#   tick 2 (revive, deleted_at NULL, qty>0):
+#     * the non-tombstone upsert path re-INSERTs the cloud_lots mirror.
+#     * (current code) does NOT touch the physical `lots` row.
+#
+# CORRECT END STATE — the physical-vs-cloud distinction:
+#   * cloud_lots IS a derived mirror of cloud inventory. After the revive it
+#     MUST be present + live (qty>0, deleted_at NULL) so the catch-all
+#     classifier sees the inventory again. This is the bug that would matter
+#     if the mirror were never re-created.
+#   * `lots` tracks PHYSICAL shelf presence (on_shelf / in_flight / weight),
+#     which is SEPARATE from cloud inventory. A cloud-side inventory revive
+#     (import_shopping topping the lot back up, or a live_scale claim) does
+#     NOT mean the bottle is physically back on the shelf. So the physical
+#     `lots` row must NOT be auto-un-'lost'ed to 'on_shelf' — that would
+#     fabricate a physical presence the load cells never observed. It should
+#     stay 'lost' until a real physical event (a weight increase) re-places
+#     it. Blindly reviving `lots` here would be WRONG.
+#
+# These tests pin BOTH halves so the behavior can't silently regress either
+# way (mirror-not-restored, or physical-lots-wrongly-revived).
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_tombstone_then_revive_restores_mirror_keeps_lots_lost(conn, tmp_path):
+    """Tombstone then revive of the SAME cloud lot_id:
+    cloud_lots mirror must be RESTORED + live; physical `lots` row stays 'lost'.
+    """
+    cloud_lot_id = "cloud-lot-revive"
+    pi_lot_id, _pe_id = _seed_inflight_pi_and_cloud(
+        conn, cloud_lot_id=cloud_lot_id,
+    )
+
+    # Sanity: mirror present + Pi lot in_flight before anything happens.
+    assert cloud_lot_id in _all_cloud_lot_ids(conn)
+    assert (
+        conn.execute(
+            "SELECT status FROM lots WHERE lot_id = ?", (pi_lot_id,)
+        ).fetchone()["status"]
+        == "in_flight"
+    )
+
+    # ---- tick 1: cloud tombstones the lot ----
+    dead = _lot(
+        cloud_lot_id,
+        updated_at="2026-04-28T06:00:00Z",
+        deleted_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(dead))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    p.tick_once()
+
+    # Post-tombstone: mirror gone, Pi physical lot flagged 'lost'.
+    assert cloud_lot_id not in _all_cloud_lot_ids(conn)
+    assert (
+        conn.execute(
+            "SELECT status FROM lots WHERE lot_id = ?", (pi_lot_id,)
+        ).fetchone()["status"]
+        == "lost"
+    )
+
+    # ---- tick 2: cloud REVIVES the same lot_id in place (T1 trigger) ----
+    # deleted_at NULL again, qty>0, updated_at bumped past the watermark.
+    revived = _lot(
+        cloud_lot_id,
+        qty=4.0,
+        updated_at="2026-04-29T09:00:00Z",
+        deleted_at=None,
+    )
+    fetch.return_value = _payload(revived)
+    applied = p.tick_once()
+
+    assert applied == 1
+
+    # (a) cloud_lots mirror RESTORED + live, so the classifier sees inventory.
+    mirror = conn.execute(
+        "SELECT qty_containers, deleted_at FROM cloud_lots WHERE lot_id = ?",
+        (cloud_lot_id,),
+    ).fetchone()
+    assert mirror is not None, (
+        "cloud_lots mirror was NOT restored on revive — the catch-all "
+        "classifier would stay blind to the revived inventory"
+    )
+    assert float(mirror["qty_containers"]) == pytest.approx(4.0)
+    # The poller never persists tombstones locally, so a live mirror row has
+    # deleted_at NULL.
+    assert mirror["deleted_at"] is None
+
+    # (b) Physical `lots` row MUST stay 'lost' — a cloud inventory revive is
+    # NOT a physical re-placement. The poller must not fabricate shelf
+    # presence the load cells never observed.
+    pi_row = conn.execute(
+        "SELECT status, in_flight_since, pickup_event_id "
+        "FROM lots WHERE lot_id = ?",
+        (pi_lot_id,),
+    ).fetchone()
+    assert pi_row["status"] == "lost", (
+        f"physical lots row was wrongly revived to {pi_row['status']!r}; a "
+        "cloud-side inventory revive must NOT un-'lost' a physical lot — only "
+        "a real weight event may do that"
+    )
+    # CHECK invariant on a non-in_flight row: markers stay cleared.
+    assert pi_row["in_flight_since"] is None
+    assert pi_row["pickup_event_id"] is None
+
+
+def test_cloud_tombstone_then_revive_no_pi_lot_just_restores_mirror(conn, tmp_path):
+    """Revive when there is NO physical Pi `lots` row at all (e.g. the lot was
+    never physically on this shelf — a pure cloud inventory item). The mirror
+    must still be restored live; no phantom `lots` row may be minted."""
+    cloud_lot_id = "cloud-lot-revive-no-pi"
+
+    # Seed only a cloud_lots mirror (no Pi `lots` row), product exists for FK.
+    conn.execute(
+        "INSERT OR IGNORE INTO products (product_id, name, net_weight_g) "
+        "VALUES (?, ?, ?)",
+        ("prod-cloudonly", "Cloud Only", 100.0),
+    )
+    conn.execute(
+        "INSERT INTO cloud_lots (lot_id, product_id, qty_containers, updated_at) "
+        "VALUES (?, 'prod-cloudonly', 1.0, '2026-04-20T10:00:00Z')",
+        (cloud_lot_id,),
+    )
+    conn.commit()
+
+    # tick 1: tombstone (deletes mirror; no Pi lot to flag).
+    dead = _lot(
+        cloud_lot_id, product_id="prod-cloudonly",
+        updated_at="2026-04-28T06:00:00Z", deleted_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(dead))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    p.tick_once()
+    assert cloud_lot_id not in _all_cloud_lot_ids(conn)
+
+    # tick 2: revive in place.
+    revived = _lot(
+        cloud_lot_id, product_id="prod-cloudonly", qty=2.0,
+        updated_at="2026-04-29T09:00:00Z", deleted_at=None,
+    )
+    fetch.return_value = _payload(revived)
+    p.tick_once()
+
+    # Mirror restored live.
+    mirror = conn.execute(
+        "SELECT qty_containers FROM cloud_lots WHERE lot_id = ?",
+        (cloud_lot_id,),
+    ).fetchone()
+    assert mirror is not None
+    assert float(mirror["qty_containers"]) == pytest.approx(2.0)
+
+    # No phantom physical lot was minted for this cloud-only product.
+    pi_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM lots WHERE product_id = 'prod-cloudonly'",
+    ).fetchone()["n"]
+    assert pi_count == 0
+
+
+# ---------------------------------------------------------------------------
 # Audit gap G4 — state.write OSError must revert in-memory watermark and
 # NOT reset backoff (so the next tick refetches the same range with the
 # already-elevated retry cadence).
