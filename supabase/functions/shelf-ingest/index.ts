@@ -1228,6 +1228,21 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
     }
   }
 
+  // Validate `unit` at the edge BEFORE any mutation (H-7/H-8 partial-apply
+  // fix). The scan_transactions table CHECKs unit IN {container, serving}.
+  // Previously `unit` was only `typeof === 'string'`-checked: an invalid unit
+  // ('kg') sailed past the gate, execute_scan_action committed a stock change
+  // (purchase ignores p_unit; consume coerces), then the SEPARATE audit insert
+  // hit the CHECK and 500'd WITHOUT writing an idempotency row → a Pi retry
+  // re-ran the mutation → double mint / double consume. Reject up front so a
+  // bad unit can never commit a mutation. (The execute_scan_and_record RPC
+  // re-validates as defense-in-depth, but failing fast here is cleaner.)
+  if (body.unit !== undefined && body.unit !== null) {
+    if (typeof body.unit !== 'string' || (body.unit !== 'container' && body.unit !== 'serving')) {
+      return jsonResponse({ error: "unit must be 'container' or 'serving'" }, 400);
+    }
+  }
+
   const piEventId: string | null =
     typeof body.pi_event_id === 'string' && body.pi_event_id.length > 0 ? body.pi_event_id : null;
 
@@ -1371,25 +1386,34 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
     }
   }
 
-  // ─── Execute action via private.execute_scan_action ─────────────
+  // ─── Execute action + record audit row ATOMICALLY ───────────────
   const defaultUnit = mode === 'consume_macros' || mode === 'consume_no_macros' ? 'serving' : 'container';
   const qty = typeof body.qty === 'number' ? body.qty : 1;
   const unit = typeof body.unit === 'string' ? body.unit : defaultUnit;
   const nutritionSnapshot =
     body.nutrition_snapshot && typeof body.nutrition_snapshot === 'object' ? body.nutrition_snapshot : null;
 
-  // private.execute_scan_action via the chefbyte-schema PostgREST wrapper
-  // (migration 20260503100150). PostgREST only exposes the schemas listed
-  // in supabase/config.toml (public, graphql_public, hub, coachbyte,
-  // chefbyte) — the wrapper is a thin SECURITY DEFINER pass-through that
-  // delegates to private.execute_scan_action.
-  const actionQ = await (supabase as any).schema('chefbyte').rpc('execute_scan_action', {
+  // H-8 fix: private.execute_scan_and_record applies the scan AND inserts the
+  // matching scan_transactions row in ONE transaction (via the chefbyte-schema
+  // PostgREST wrapper, migration 20260515090000). Previously the stock
+  // mutation (execute_scan_action) and the audit insert were two SEPARATE
+  // PostgREST transactions — if the audit insert failed, the committed
+  // mutation left no idempotency row and a Pi retry double-applied. Now the
+  // applied audit row commits atomically with the mutation, so the
+  // (user_id, pi_event_id) unique index makes any retry idempotent at the
+  // SELECT above. On an in-RPC failure NOTHING commits → we log an errored
+  // row (its own txn) so the Pi still sees a stable shape and the retry path
+  // is deduped via that errored row's pi_event_id.
+  const actionQ = await (supabase as any).schema('chefbyte').rpc('execute_scan_and_record', {
     p_user_id: userId,
     p_product_id: productId,
+    p_barcode: barcode,
     p_mode: mode,
     p_qty: qty,
     p_unit: unit,
     p_nutrition_snapshot: nutritionSnapshot,
+    p_source: source,
+    p_pi_event_id: piEventId,
   });
 
   if (actionQ.error) {
@@ -1402,50 +1426,20 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
       productId,
       qty,
       unit,
-      errorMsg: actionQ.error.message ?? 'execute_scan_action failed',
+      errorMsg: actionQ.error.message ?? 'execute_scan_and_record failed',
     });
     return jsonResponse(errored);
   }
 
   const result = (actionQ.data ?? {}) as {
+    transaction_id?: string | null;
     applied_lot_id?: string | null;
     applied_food_log_id?: string | null;
     applied_cart_item_id?: string | null;
   };
 
-  // ─── Insert applied transaction ─────────────────────────────────
-  const nowIso = new Date().toISOString();
-  const logicalDate = nowIso.slice(0, 10);
-  const tx = await supabase
-    .schema('chefbyte')
-    .from('scan_transactions')
-    .insert({
-      user_id: userId,
-      barcode,
-      product_id: productId,
-      mode,
-      qty,
-      unit,
-      nutrition_snapshot: nutritionSnapshot,
-      status: 'applied',
-      logical_date: logicalDate,
-      source,
-      pi_event_id: piEventId,
-      applied_lot_id: result.applied_lot_id ?? null,
-      applied_food_log_id: result.applied_food_log_id ?? null,
-      applied_cart_item_id: result.applied_cart_item_id ?? null,
-      applied_at: nowIso,
-    })
-    .select('transaction_id')
-    .single();
-
-  if (tx.error || !tx.data) {
-    console.error('shelf-ingest: scan_transactions insert failed', tx.error);
-    return jsonResponse({ error: tx.error?.message ?? 'transaction insert failed' }, 500);
-  }
-
   return jsonResponse({
-    transaction_id: tx.data.transaction_id,
+    transaction_id: result.transaction_id ?? null,
     status: 'applied',
     product_id: productId,
     mode,

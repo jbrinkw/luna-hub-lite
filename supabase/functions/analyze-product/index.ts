@@ -110,47 +110,46 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
   });
 }
 
-/** Check and increment daily quota. Returns true if under limit. */
+/**
+ * Atomically check + increment the per-user daily quota. Returns true when
+ * the request is under the cap (and the counter was advanced), false when at
+ * the cap (no advance) or on any error.
+ *
+ * H-7 (deep-audit 2026-06-03): the prior implementation was a CLIENT-side
+ * read-modify-write — SELECT count → if (count >= QUOTA) return false →
+ * upsert({count: count + 1}) (an ABSOLUTE value). Two concurrent requests
+ * both read count=99, both passed the gate, both wrote 100 → the platform-LLM
+ * cap was bypassed. We now delegate to chefbyte.analyze_check_and_increment,
+ * which does the gate + increment INSIDE one SQL statement (FOR UPDATE row
+ * lock + count = count + 1, refusing past the cap without over-incrementing) —
+ * mirroring the walmart_check_and_increment reference. The same {date, count}
+ * JSON shape in chefbyte.user_config (key='analyze_quota') + the UTC-day reset
+ * are preserved by the RPC, so existing rows keep working.
+ *
+ * The wrapper is granted to BOTH authenticated (browser JWT path) and
+ * service_role (Pi USB forwarder). The counter is always keyed on the explicit
+ * userId we pass — the browser client relays its own JWT, so an authenticated
+ * caller can only ever bump its own counter through this fn.
+ *
+ * Timing is unchanged: the caller still invokes this only AFTER the OFF lookup
+ * succeeds (charge-after-OFF), so transient upstream failures never consume
+ * quota.
+ */
 async function checkQuota(supabase: any, userId: string): Promise<boolean> {
-  const today = new Date().toISOString().slice(0, 10);
-  const key = 'analyze_quota';
-
-  const { data: config } = await supabase
+  const { data, error } = await supabase
     .schema('chefbyte')
-    .from('user_config')
-    .select('value')
-    .eq('user_id', userId)
-    .eq('key', key)
-    .single();
+    .rpc('analyze_check_and_increment', { p_user_id: userId, p_quota: DAILY_QUOTA });
 
-  let count = 0;
-  if (config?.value) {
-    try {
-      const parsed = JSON.parse(config.value);
-      if (parsed.date === today) {
-        count = parsed.count ?? 0;
-      }
-      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: malformed quota JSON in user_config resets the counter — safe to swallow and treat as fresh
-    } catch {}
-  }
-
-  if (count >= DAILY_QUOTA) return false;
-
-  // Upsert incremented counter. If the write fails we MUST refuse the
-  // request — otherwise the counter never advances and the same user can
-  // burn through unlimited LLM calls (RLS rejection / outage / etc would
-  // silently degrade quota enforcement).
-  const newValue = JSON.stringify({ date: today, count: count + 1 });
-  const { error: quotaErr } = await supabase
-    .schema('chefbyte')
-    .from('user_config')
-    .upsert({ user_id: userId, key, value: newValue }, { onConflict: 'user_id,key' });
-  if (quotaErr) {
-    console.error('analyze-product: quota upsert failed', quotaErr);
+  if (error) {
+    // A failed quota call MUST refuse the request — otherwise the counter
+    // never advances and the user could burn unlimited LLM calls (RLS
+    // rejection / outage / etc would silently degrade enforcement).
+    console.error('analyze-product: quota RPC failed', error);
     return false;
   }
 
-  return true;
+  // RPC returns JSONB { allowed, used, remaining, limit }.
+  return data?.allowed === true;
 }
 
 /**

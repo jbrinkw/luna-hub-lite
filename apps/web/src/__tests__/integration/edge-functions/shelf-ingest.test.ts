@@ -2762,6 +2762,152 @@ describe('shelf-ingest Edge Function', () => {
     }
   });
 
+  // ─── /barcode-scan: edge-side unit validation + atomic apply (H-8) ──
+  //
+  // H-8 regression: `body.unit` was only `typeof === 'string'`-checked.
+  // An invalid unit ('kg') sailed past, execute_scan_action committed a
+  // stock change, then the SEPARATE scan_transactions insert hit the
+  // unit CHECK and 500'd WITHOUT writing an idempotency row → a Pi retry
+  // re-ran the mutation → double mint / double consume. The fix rejects
+  // invalid units with 400 BEFORE any mutation AND folds the stock
+  // mutation + audit insert into one transaction (execute_scan_and_record).
+  it('POST /barcode-scan rejects an invalid unit with 400 and mutates nothing (H-8)', async () => {
+    const ctx = await provisionScannerUser('si-bs-unit-bad');
+    try {
+      const barcode = 'BS-UNITBAD-' + randomBytes(4).toString('hex').toUpperCase();
+      const { data: prod } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .insert({
+          user_id: ctx.userId,
+          name: 'Bad Unit Product',
+          barcode,
+          servings_per_container: 1,
+          net_weight_g: 100,
+        })
+        .select('product_id')
+        .single();
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const piEventId = 'evt-' + crypto.randomUUID();
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        // 'kg' violates the scan_transactions CHECK (container|serving).
+        body: JSON.stringify({ barcode, qty: 1, unit: 'kg', pi_event_id: piEventId }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('unit');
+
+      // CRITICAL: no stock_lot was minted (the pre-fix partial-apply would
+      // have committed one before the audit insert failed).
+      const { data: lots } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lots).toHaveLength(0);
+
+      // And no scan_transactions row at all (errored OR applied) — early
+      // reject is pre-RPC, so there's nothing to dedup AND nothing committed.
+      const { count } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact', head: true })
+        .eq('user_id', ctx.userId);
+      expect(count).toBe(0);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan(purchase) applies stock + records audit row ATOMICALLY (H-8)', async () => {
+    const ctx = await provisionScannerUser('si-bs-atomic');
+    try {
+      const barcode = 'BS-ATOMIC-' + randomBytes(4).toString('hex').toUpperCase();
+      const { data: prod } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .insert({
+          user_id: ctx.userId,
+          name: 'Atomic Purchase Product',
+          barcode,
+          servings_per_container: 2,
+          net_weight_g: 400,
+        })
+        .select('product_id')
+        .single();
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const piEventId = 'evt-' + crypto.randomUUID();
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, qty: 1, unit: 'container', pi_event_id: piEventId }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('applied');
+      expect(body.transaction_id).toBeTruthy();
+      expect(body.applied_lot_id).toBeTruthy();
+
+      // The minted lot and the recorded audit row exist and are linked —
+      // both written in the single execute_scan_and_record transaction.
+      const { data: lots } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lots).toHaveLength(1);
+      expect(lots[0].lot_id).toBe(body.applied_lot_id);
+
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id, status, applied_lot_id, source, pi_event_id, logical_date')
+        .eq('transaction_id', body.transaction_id)
+        .single();
+      expect(tx.status).toBe('applied');
+      expect(tx.applied_lot_id).toBe(body.applied_lot_id);
+      expect(tx.source).toBe('pi_usb');
+      expect(tx.pi_event_id).toBe(piEventId);
+      // logical_date resolved via the profile tz (get_logical_date), not a
+      // raw UTC slice — a non-null DATE on the row.
+      expect(tx.logical_date).toBeTruthy();
+
+      // A retry with the same pi_event_id is deduped (idempotent) — exactly
+      // one applied row, no second lot. Proves the atomic commit closed the
+      // double-apply window.
+      const retry = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, qty: 1, unit: 'container', pi_event_id: piEventId }),
+      });
+      const retryBody = await retry.json();
+      expect(retryBody.idempotent).toBe(true);
+      expect(retryBody.transaction_id).toBe(body.transaction_id);
+
+      const { count: lotCount } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id', { count: 'exact', head: true })
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lotCount).toBe(1);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
   // ─── /scan-transaction/:id/void: browser-JWT undo ──────────────────
   //
   // Task 6: the Settings → Scanner Transactions tab calls this when

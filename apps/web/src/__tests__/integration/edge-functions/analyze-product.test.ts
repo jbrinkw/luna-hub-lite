@@ -218,6 +218,65 @@ describe('Analyze-Product Edge Function', () => {
     expect(parsed.count).toBe(1);
   });
 
+  it('concurrent requests at the cap cannot bypass the daily quota (H-7)', async () => {
+    // H-7 regression: the old client-side read-modify-write let two
+    // concurrent requests both read count=99, both pass the gate, both
+    // upsert 100 → the 100/day cap was bypassed. The atomic RPC
+    // (chefbyte.analyze_check_and_increment) gates + increments inside one
+    // SQL statement, so only the remaining slots succeed.
+    //
+    // Seed count = 98 (cap 100 → 2 slots left), fire 6 simultaneous
+    // canned-OFF requests, and assert EXACTLY 4 are rejected with 429 and
+    // the persisted counter lands at EXACTLY 100 (never over-increments).
+    // We count 429s (quota rejections) rather than 200s because a request
+    // that passes the quota gate may still 503 if ANTHROPIC_API_KEY is
+    // unset in the runtime — quota is charged before the AI call either
+    // way, so 429-count + final-count are invariant to the AI outcome.
+    const today = new Date().toISOString().slice(0, 10);
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .upsert(
+        { user_id: userId, key: 'analyze_quota', value: JSON.stringify({ date: today, count: 98 }) },
+        { onConflict: 'user_id,key' },
+      );
+
+    const CONCURRENCY = 6;
+    const SLOTS_LEFT = 2; // 100 - 98
+    const responses = await Promise.all(
+      Array.from({ length: CONCURRENCY }, (_, i) =>
+        fetch(EDGE_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${userJwt}`,
+            'x-test-off-mode': 'canned',
+          },
+          body: JSON.stringify({ barcode: `CONCURRENTQUOTA${i}` }),
+        }),
+      ),
+    );
+    const statuses = responses.map((r) => r.status);
+    const rejected = statuses.filter((s) => s === 429).length;
+    const passedQuota = statuses.filter((s) => s !== 429).length;
+
+    // Exactly the remaining slots passed the gate; the rest were refused.
+    expect(passedQuota).toBe(SLOTS_LEFT);
+    expect(rejected).toBe(CONCURRENCY - SLOTS_LEFT);
+
+    // The counter is pinned at the cap — the atomic increment never wrote
+    // past 100 (the pre-fix absolute-value write would have left it at 99,
+    // letting future requests through, or raced above the cap).
+    const { data: config } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'analyze_quota')
+      .single();
+    expect(JSON.parse(config.value).count).toBe(100);
+  });
+
   // ─── OpenFoodFacts lookup ──────────────────────────────────
 
   it.skipIf(skipLiveOff)('returns 404 for barcode not found in OpenFoodFacts', async () => {

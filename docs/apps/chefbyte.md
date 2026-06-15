@@ -25,7 +25,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - OpenFoodFacts: 100 req/min rate limit. Products not found or with null/zero macros fall through to Claude analysis.
 - If any step in the pipeline fails after local product check (OFF down, Claude error), a placeholder product is automatically created with `is_placeholder = true`. The user can edit the product details later.
 - The barcode pipeline handles general product data only (identity, nutrition, naming). Walmart is a separate system for pricing and ordering.
-- Per-user daily quota on `analyze-product` calls (100/day). When exceeded, the scan falls through to placeholder creation. BYOK option is a future feature. Quota is charged only AFTER OFF returns successfully — transient upstream failures (OFF 5xx, malformed body) return `503 { ai_degraded: true, ai_reason: 'off_unavailable' }` and do NOT consume the user's daily budget.
+- Per-user daily quota on `analyze-product` calls (100/day). When exceeded, the scan falls through to placeholder creation. BYOK option is a future feature. Quota is charged only AFTER OFF returns successfully — transient upstream failures (OFF 5xx, malformed body) return `503 { ai_degraded: true, ai_reason: 'off_unavailable' }` and do NOT consume the user's daily budget. The check-and-increment is **atomic** in the DB (`private.analyze_check_and_increment` — gate + `count = count + 1` inside one SQL statement under a row lock, mirroring the walmart quota path), so concurrent scans at the cap cannot bypass the limit. The `{date, count}` counter is keyed on the UTC calendar day and resets automatically at UTC midnight.
 - Barcode is nullable — products can exist without barcodes (manual creation, bulk items, homemade products). Unique constraint: `UNIQUE(user_id, barcode) WHERE barcode IS NOT NULL`.
 - Keypad with context-aware units: Containers for purchase, Servings for consume (toggleable). Unit conversion applies when toggling between servings and containers — values recalculate using `servings_per_container`.
 - **Undo/rollback per scan:** Each scan mode provides an undo button that reverses the DB operations (stock additions, stock removals, macro logs, shopping list additions) for the most recent scan.
@@ -50,7 +50,13 @@ currently-active scanner mode (purchase / consume / shopping).
 `chefbyte.scan_transactions`. Visit Settings → Scanner Transactions to
 view, filter, or void past scans. Voiding reverses the side-effect
 (deletes the stock_lot, food_log, or shopping_list row created by the
-scan).
+scan). The Pi USB barcode-scan path applies the stock mutation **and**
+writes its audit row in a single transaction (`private.execute_scan_and_record`),
+so a partial-apply can never leave an un-deduped mutation behind — a Pi
+retry of the same `pi_event_id` is always idempotent. `unit` is validated
+against `{container, serving}` before any mutation. `scan_transactions.logical_date`
+is stamped via the profile-timezone `get_logical_date`, matching the food_log
+ledger.
 
 **Pi setup**: set `BARCODE_SCANNER_ENABLED=true` and
 `BARCODE_SCANNER_DEVICE=/dev/input/eventX` in the Pi env. The scanner
