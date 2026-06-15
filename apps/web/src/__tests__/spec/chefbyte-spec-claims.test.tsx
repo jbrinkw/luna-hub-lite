@@ -1,170 +1,44 @@
 /**
  * Spec-vs-implementation tests — ChefByte
  *
- * Each test pins one spec claim from docs/apps/chefbyte.md.
- * These tests MUST FAIL if the implementation drifts from the spec.
+ * Each test drives a REAL imported production symbol so it can turn RED when
+ * that symbol regresses. Earlier revisions of this file re-implemented the
+ * helpers inline and asserted the COPY (or asserted JS-stdlib behaviour like
+ * `Math.ceil`/`toFixed`), which could never fail for a production change. Those
+ * tautological claims were removed; the falsifiable ones now import the
+ * shipped functions.
  *
- * Strategy: pure-logic tests that mirror what the production code does.
- * We import only the exported pure helpers (which carry no Supabase
- * dependency), and verify spec claims via direct function calls.
- * Render-level tests live in the unit/ tree already.
+ * Spec claims with a real web hook (pinned here):
+ *   • ilike search escapes %, _, \  → escapeIlike (src/shared/supabase.ts)
+ *   • pickEarliestInFlight           → src/pages/chefbyte/InventoryPage.tsx
+ *   • isLotOnScale / in-flight + qty  → src/pages/chefbyte/InventoryPage.tsx
  *
- * Spec claims covered:
- *   1. InventoryPage default viewMode is 'grouped' (not 'lots')
- *   2. Both 'grouped' and 'lots' modes are typed — not arbitrary strings
- *   3. Quantities displayed to 1 decimal (toFixed(1)) in UI, stored as NUMERIC(10,3)
- *   4. Stock floors at 0 — totalStock sum from non-negative lots is always >= 0
- *   5. Shopping quantities always rounded UP to whole containers (Math.ceil)
- *   6. ilike search escapes %, _, \ before passing to Supabase
- *   7. Barcode nullable — products can have barcode=null
- *   8. Lot merge key: different expiry = different lot
- *   9. pickEarliestInFlight: null when no in-flight lots
- *  10. isLotOnScale: false when in-flight, even if lot is paired
+ * Spec claims with NO falsifiable web symbol (intentionally NOT faked — a
+ * re-implemented copy or a `Math.ceil(1.1) === 2` stdlib assertion gives false
+ * coverage; these are enforced/covered elsewhere):
+ *   • Inventory default viewMode 'grouped' — inline `useState<ViewMode>('grouped')`
+ *     render detail; covered by InventoryPage render/e2e tests.
+ *   • Quantities displayed to 1 decimal — inline `Number(x).toFixed(1)` at call
+ *     sites, no exported formatter; this is a JS-stdlib fact, not prod logic.
+ *   • Stock floors at 0 — enforced by the `stock_lots_qty_nonneg` CHECK + the
+ *     `consume_product` SQL floor; covered by pgTAP, not web arithmetic.
+ *   • Shopping qty rounded up — inline `Math.ceil(...)` at call sites, no
+ *     exported helper; the spec rule is a stdlib fact here.
+ *   • Barcode nullable / lot merge key (product+location+expires) — DB schema
+ *     facts; the merge happens in `add_stock`/`consume` SQL. Covered by pgTAP.
  */
 
 import { describe, it, expect } from 'vitest';
-
-// Pure functions copy-tested from production source.
-// We import the IMPLEMENTATIONS rather than the production modules so we
-// avoid pulling in real Supabase client code. The test verifies the
-// contract — if the production helper changes its logic, tests break.
-// To keep these load-bearing, each helper is re-implemented to mirror the
-// exact production code, then tested against the spec claim.
-
-// --- escapeIlike (from src/shared/supabase.ts) ---
-// Production: export const escapeIlike = (s: string): string => s.replace(/[%_\\]/g, '\\$&');
-function escapeIlike(s: string): string {
-  return s.replace(/[%_\\]/g, '\\$&');
-}
-
-// --- pickEarliestInFlight (from src/pages/chefbyte/InventoryPage.tsx) ---
-// Production: iterates lots, returns earliest in_flight_since or null
-function pickEarliestInFlight(lots: ReadonlyArray<{ in_flight_since: string | null }>): string | null {
-  let earliest: string | null = null;
-  for (const l of lots) {
-    if (l.in_flight_since !== null) {
-      if (earliest === null || l.in_flight_since < earliest) {
-        earliest = l.in_flight_since;
-      }
-    }
-  }
-  return earliest;
-}
-
-// --- isLotOnScale (from src/pages/chefbyte/InventoryPage.tsx) ---
-// Production: lot is on scale iff pairedLotIds has lot_id AND not in-flight AND qty > epsilon
-const ON_SCALE_QTY_EPSILON = 0.01;
-function isLotOnScale(
-  lot: { lot_id: string; in_flight_since: string | null; qty_containers?: number | string | null },
-  pairedLotIds: ReadonlySet<string>,
-): boolean {
-  if (!pairedLotIds.has(lot.lot_id)) return false;
-  if (lot.in_flight_since !== null) return false;
-  if (lot.qty_containers != null) {
-    const q = Number(lot.qty_containers);
-    if (q <= ON_SCALE_QTY_EPSILON) return false;
-  }
-  return true;
-}
+import { escapeIlike } from '@/shared/supabase';
+import { pickEarliestInFlight, isLotOnScale, ON_SCALE_QTY_EPSILON } from '@/pages/chefbyte/InventoryPage';
 
 // =========================================================================
-// 1 & 2. ViewMode: 'grouped' is default, both modes are well-typed
+// ilike search escapes %, _, \ before passing to Supabase
+//   real symbol: escapeIlike — prevents a user-typed `%` from matching all
+//   rows (and a `\` from breaking the ILIKE escape sequence).
 // =========================================================================
 
-describe('spec: inventory viewMode', () => {
-  it('"grouped" is the default viewMode', () => {
-    // Mirrors: const [viewMode, setViewMode] = useState<ViewMode>('grouped')
-    const defaultViewMode: 'grouped' | 'lots' = 'grouped';
-    expect(defaultViewMode).toBe('grouped');
-  });
-
-  it('"lots" is a valid alternative viewMode', () => {
-    const lotMode: 'grouped' | 'lots' = 'lots';
-    expect(lotMode).not.toBe('grouped');
-  });
-});
-
-// =========================================================================
-// 3. Quantities displayed to 1 decimal in UI, stored to 3 decimals in DB
-// =========================================================================
-
-describe('spec: quantity displayed to 1 decimal, stored to 3', () => {
-  it('toFixed(1) used in UI — 2.500 displays as "2.5"', () => {
-    expect(Number(2.5).toFixed(1)).toBe('2.5');
-  });
-
-  it('toFixed(1) for zero stock: 0.000 → "0.0"', () => {
-    expect(Number(0.0).toFixed(1)).toBe('0.0');
-  });
-
-  it('3-decimal DB value NOT shown verbatim: "2.500" fails 1-decimal check', () => {
-    const oneDecimalRe = /^\d+\.\d$/;
-    expect(oneDecimalRe.test('2.500')).toBe(false);
-    expect(oneDecimalRe.test('2.5')).toBe(true);
-  });
-
-  it('toFixed(1) does not produce more than 1 decimal place', () => {
-    const display = Number(1.333).toFixed(1);
-    expect(display).toBe('1.3');
-    expect(display).not.toMatch(/\.\d{2}/);
-  });
-});
-
-// =========================================================================
-// 4. Stock floors at 0 — no negative totalStock
-// =========================================================================
-
-describe('spec: stock floors at 0', () => {
-  it('lots with non-negative qty_containers never produce negative totalStock', () => {
-    const lots = [{ qty_containers: 2 }, { qty_containers: 0 }, { qty_containers: 1.5 }];
-    const totalStock = lots.reduce((sum, l) => sum + Number(l.qty_containers), 0);
-    expect(totalStock).toBeGreaterThanOrEqual(0);
-  });
-
-  it('single zero-qty lot → totalStock = 0', () => {
-    const lots = [{ qty_containers: 0 }];
-    const totalStock = lots.reduce((sum, l) => sum + Number(l.qty_containers), 0);
-    expect(totalStock).toBe(0);
-  });
-
-  it('Math.max(0, qty) clamp prevents rogue negative DB value from producing negative stock', () => {
-    const rawQty = -1;
-    const clamped = Math.max(0, rawQty);
-    expect(clamped).toBe(0);
-    const lots = [{ qty_containers: clamped }];
-    const totalStock = lots.reduce((sum, l) => sum + Number(l.qty_containers), 0);
-    expect(totalStock).toBeGreaterThanOrEqual(0);
-  });
-});
-
-// =========================================================================
-// 5. Shopping quantities always rounded UP to whole containers
-// =========================================================================
-
-describe('spec: shopping quantities rounded up to whole containers', () => {
-  it('Math.ceil(1.1) = 2 — never under-buy', () => {
-    expect(Math.ceil(1.1)).toBe(2);
-  });
-
-  it('Math.ceil(3) = 3 — exact integer stays same', () => {
-    expect(Math.ceil(3)).toBe(3);
-  });
-
-  it('Math.ceil(0.1) = 1 — fractional need always buys at least 1', () => {
-    expect(Math.ceil(0.1)).toBe(1);
-  });
-
-  it('Math.floor (wrong) vs Math.ceil (spec) for 1.1 containers', () => {
-    expect(Math.floor(1.1)).toBe(1); // would under-buy — spec forbids this
-    expect(Math.ceil(1.1)).toBe(2); // spec-correct
-  });
-});
-
-// =========================================================================
-// 6. ilike search escapes %, _, \ before passing to Supabase
-// =========================================================================
-
-describe('spec: ilike search escapes special characters', () => {
+describe('spec: ilike search escapes special characters (escapeIlike)', () => {
   it('escapes % to prevent wildcard match-all', () => {
     expect(escapeIlike('%')).toBe('\\%');
   });
@@ -187,104 +61,71 @@ describe('spec: ilike search escapes special characters', () => {
 });
 
 // =========================================================================
-// 7. Barcode nullable — products can exist without barcodes
+// pickEarliestInFlight — real exported helper from InventoryPage
+//   Earliest in_flight_since wins so the in-flight badge reflects the
+//   longest-outstanding pickup; null when nothing is in flight.
 // =========================================================================
 
-describe('spec: barcode is nullable', () => {
-  it('product with barcode=null is structurally valid', () => {
-    const product = { product_id: 'prod-1', name: 'Bulk Rice', barcode: null };
-    expect(product.barcode).toBeNull();
-  });
-
-  it('barcode display path handles null gracefully (no crash)', () => {
-    const barcode: string | null = null;
-    const display = barcode ?? '';
-    expect(display).toBe('');
-  });
-});
-
-// =========================================================================
-// 8. Lot merge key: different expiry = different lot
-// =========================================================================
-
-describe('spec: lot merge key (product_id + location_id + expires_on)', () => {
-  const key = (pid: string, lid: string, exp: string | null) => `${pid}|${lid}|${exp ?? 'null'}`;
-
-  it('same product+location+expiry → same merge key (merges)', () => {
-    const k1 = key('prod-1', 'loc-1', '2026-06-01');
-    const k2 = key('prod-1', 'loc-1', '2026-06-01');
-    expect(k1).toBe(k2);
-  });
-
-  it('different expiry → different key (separate lot)', () => {
-    const k1 = key('prod-1', 'loc-1', '2026-06-01');
-    const k2 = key('prod-1', 'loc-1', '2026-07-01');
-    expect(k1).not.toBe(k2);
-  });
-
-  it('different location → different key (separate lot)', () => {
-    const k1 = key('prod-1', 'loc-fridge', '2026-06-01');
-    const k2 = key('prod-1', 'loc-pantry', '2026-06-01');
-    expect(k1).not.toBe(k2);
-  });
-
-  it('null expiry (no expiration) creates its own merge key', () => {
-    const withExpiry = key('prod-1', 'loc-1', '2026-06-01');
-    const noExpiry = key('prod-1', 'loc-1', null);
-    expect(withExpiry).not.toBe(noExpiry);
-  });
-});
-
-// =========================================================================
-// 9. pickEarliestInFlight
-// =========================================================================
-
-describe('spec: pickEarliestInFlight', () => {
+describe('spec: pickEarliestInFlight (real InventoryPage helper)', () => {
   it('returns null when no lots are in flight', () => {
-    const lots = [{ in_flight_since: null }, { in_flight_since: null }];
-    expect(pickEarliestInFlight(lots)).toBeNull();
+    expect(pickEarliestInFlight([{ in_flight_since: null }, { in_flight_since: null }])).toBeNull();
   });
 
-  it('returns the earliest in_flight_since when any lot is in flight', () => {
+  it('returns the EARLIEST in_flight_since across lots (not the first encountered)', () => {
     const lots = [
       { in_flight_since: '2026-04-30T10:00:00Z' },
-      { in_flight_since: '2026-04-30T08:00:00Z' }, // earlier
+      { in_flight_since: '2026-04-30T08:00:00Z' }, // earlier — must win
       { in_flight_since: null },
     ];
     expect(pickEarliestInFlight(lots)).toBe('2026-04-30T08:00:00Z');
   });
 
-  it('single in-flight lot returns its timestamp', () => {
-    const lots = [{ in_flight_since: '2026-04-29T12:00:00Z' }];
+  it('ignores null entries and returns the only in-flight timestamp', () => {
+    const lots = [{ in_flight_since: null }, { in_flight_since: '2026-04-29T12:00:00Z' }];
     expect(pickEarliestInFlight(lots)).toBe('2026-04-29T12:00:00Z');
   });
 });
 
 // =========================================================================
-// 10. isLotOnScale: in-flight lot must NOT show On Scale
+// isLotOnScale — real exported helper from InventoryPage
+//   "On Scale" iff paired AND not in-flight AND qty >= ON_SCALE_QTY_EPSILON.
+//   An in-flight bottle is physically elsewhere → NOT on scale even if paired.
+//   A paired lot at sub-epsilon residual qty is treated as not-on-scale
+//   (phantom-empty guard; threshold MUST equal the cloud rotation threshold).
 // =========================================================================
 
-describe('spec: isLotOnScale — in-flight lot is NOT on scale', () => {
+describe('spec: isLotOnScale (real InventoryPage helper)', () => {
   const pairedLotIds = new Set(['lot-paired']);
 
-  it('paired + not in-flight + qty > epsilon → on scale', () => {
-    const lot = { lot_id: 'lot-paired', in_flight_since: null, qty_containers: 1 };
-    expect(isLotOnScale(lot, pairedLotIds)).toBe(true);
+  it('exposes the residual-qty epsilon as 0.01 (must match cloud rotation threshold)', () => {
+    expect(ON_SCALE_QTY_EPSILON).toBe(0.01);
+  });
+
+  it('paired + not in-flight + qty above epsilon → on scale', () => {
+    expect(isLotOnScale({ lot_id: 'lot-paired', in_flight_since: null, qty_containers: 1 }, pairedLotIds)).toBe(true);
   });
 
   it('paired + in-flight → NOT on scale (bottle is physically elsewhere)', () => {
-    const lot = { lot_id: 'lot-paired', in_flight_since: '2026-04-30T10:00:00Z', qty_containers: 1 };
-    expect(isLotOnScale(lot, pairedLotIds)).toBe(false);
+    expect(
+      isLotOnScale({ lot_id: 'lot-paired', in_flight_since: '2026-04-30T10:00:00Z', qty_containers: 1 }, pairedLotIds),
+    ).toBe(false);
   });
 
   it('not paired → never on scale', () => {
-    const lot = { lot_id: 'lot-unpaired', in_flight_since: null, qty_containers: 1 };
-    expect(isLotOnScale(lot, pairedLotIds)).toBe(false);
+    expect(isLotOnScale({ lot_id: 'lot-unpaired', in_flight_since: null, qty_containers: 1 }, pairedLotIds)).toBe(
+      false,
+    );
   });
 
-  it('zero-qty lot below epsilon → not on scale (phantom-empty guard)', () => {
-    // ON_SCALE_QTY_EPSILON = 0.01: lots with qty <= epsilon are excluded
-    const lot = { lot_id: 'lot-paired', in_flight_since: null, qty_containers: 0 };
-    expect(isLotOnScale(lot, pairedLotIds)).toBe(false);
+  it('paired but zero-qty (below epsilon) → not on scale (phantom-empty guard)', () => {
+    expect(isLotOnScale({ lot_id: 'lot-paired', in_flight_since: null, qty_containers: 0 }, pairedLotIds)).toBe(false);
+  });
+
+  it('qty exactly AT the epsilon (0.01) is treated as on scale (boundary is strict <)', () => {
+    // Production uses `q < ON_SCALE_QTY_EPSILON` → exactly-epsilon is on-scale.
+    // Pins the boundary direction so a flip to `<=` would go RED.
+    expect(
+      isLotOnScale({ lot_id: 'lot-paired', in_flight_since: null, qty_containers: ON_SCALE_QTY_EPSILON }, pairedLotIds),
+    ).toBe(true);
   });
 });

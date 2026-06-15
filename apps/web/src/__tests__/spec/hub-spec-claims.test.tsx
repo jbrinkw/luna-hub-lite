@@ -1,211 +1,205 @@
 /**
  * Spec-vs-implementation tests — Hub
  *
- * Each test pins one spec claim from docs/apps/hub.md.
- * These tests MUST FAIL if the implementation drifts from the spec.
+ * Each test drives a REAL imported production component/symbol so it can turn
+ * RED when that symbol regresses. Earlier revisions asserted in-file booleans
+ * (`!onlineState`, `initialLoadComplete && session === null && ...`) and string
+ * literals — copies of the spec that could never fail for a production change.
+ * Those were removed/rewired.
  *
- * Spec claims covered:
- *   1. API keys: show-once pattern (plaintext displayed once, hash stored)
- *   2. AppContext.activations drives ModuleSwitcher visibility
- *   3. OfflineIndicator shown when online=false
- *   4. Session expiry: null session after initial load → toast (not silent)
- *   5. dayStartHour defaults from profile, not hardcoded
- *   6. Extensions without credentials return isError:true on first call
+ * Spec claims with a real web hook (pinned here):
+ *   • ModuleSwitcher filters by activations  → <ModuleSwitcher /> (real render)
+ *   • OfflineIndicator shown when offline      → <OfflineIndicator /> (real render)
+ *   • Session expiry → toast (not on SIGNED_OUT) → <AuthProvider /> (real render)
+ *
+ * Spec claims with NO falsifiable web symbol (intentionally NOT faked):
+ *   • API key show-once / SHA-256 hash (hub.md): the hash is computed in the DB
+ *     (`hub` schema, SHA-256) and shown once client-side; there is no web
+ *     function to import. Asserting `typeof rawKey === 'string'` is a tautology.
+ *     Covered by the api-key-lifecycle integration + pgTAP suites.
+ *   • dayStartHour-from-profile (hub.md): resolved inside AppProvider's profile
+ *     queryFn closure (`data?.day_start_hour ?? 0`), not an exported helper.
+ *     Covered by integration/pages/hub-app-provider.test.ts.
+ *   • Extension-without-credentials returns isError:true (hub.md:33): this is an
+ *     MCP-worker / extension-tool runtime behaviour (first tool call), NOT web
+ *     code — the web ExtensionsPage only renders settings + a "Credentials
+ *     configured" boolean. Covered by app-tools/mcp-worker tests.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, act, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 
-// ---- mocks ---------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// AuthProvider needs a supabase mock whose onAuthStateChange callback we can
+// fire by hand. vi.hoisted so the reference is available inside the (hoisted)
+// vi.mock factory. (Mirrors unit/hub/AuthProvider.test.tsx.)
+// ---------------------------------------------------------------------------
+const { mockSupabase, authCallbacks } = vi.hoisted(() => {
+  const authCallbacks = { current: null as ((event: string, session: unknown) => void) | null };
+  const mockSupabase = {
+    auth: {
+      onAuthStateChange: vi.fn((cb: (event: string, session: unknown) => void) => {
+        authCallbacks.current = cb;
+        return { data: { subscription: { unsubscribe: vi.fn() } } };
+      }),
+      signInWithPassword: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+      signUp: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
+      signOut: vi.fn().mockResolvedValue({ error: null }),
+    },
+  };
+  return { mockSupabase, authCallbacks };
+});
 
 vi.mock('@/shared/supabase', () => ({
-  supabase: {
-    functions: { invoke: vi.fn(() => Promise.resolve({ data: null, error: null })) },
-    channel: vi.fn(() => ({ on: vi.fn().mockReturnThis(), subscribe: vi.fn() })),
-  },
+  supabase: mockSupabase,
   chefbyte: vi.fn(),
   coachbyte: vi.fn(),
   escapeIlike: (s: string) => s,
-}));
-
-vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u-hub', email: 'hub@test.com' }, loading: false }),
 }));
 
 vi.mock('@/shared/useRealtimeInvalidation', () => ({
   useRealtimeInvalidation: vi.fn(),
 }));
 
-// -------------------------------------------------------------------------
+// `@/shared/AppProvider` is mocked globally by setup.ts (useAppContext is a
+// vi.fn returning sensible defaults). We override its return value per-test.
+import { useAppContext } from '@/shared/AppProvider';
+import { ModuleSwitcher } from '@/components/ModuleSwitcher';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
+import { AuthProvider } from '@/shared/auth/AuthProvider';
 
-// =========================================================================
-// 1. API key show-once: plaintext is only ever held in memory, not re-fetched
-// =========================================================================
+const mockUseAppContext = vi.mocked(useAppContext);
 
-describe('spec: API key show-once pattern', () => {
-  it('generated key plaintext is a string of sufficient entropy', () => {
-    // Simulate what the key-generation flow produces in memory.
-    // The SHA-256 hash stored in DB should differ from the raw key.
-    const rawKey = 'lh_test_abc123def456xyz'; // would come from crypto.randomBytes
-    // The display model is: show rawKey once, store sha256(rawKey) in DB.
-    // After the modal closes, rawKey is gone — only the hash remains.
-    expect(typeof rawKey).toBe('string');
-    expect(rawKey.length).toBeGreaterThan(16);
-  });
+function makeCtx(overrides: Partial<ReturnType<typeof useAppContext>> = {}) {
+  return {
+    activations: { coachbyte: true, chefbyte: true },
+    online: true,
+    lastSynced: new Date(),
+    dayStartHour: 0,
+    timezone: 'America/New_York',
+    refreshActivations: vi.fn(),
+    realtimeDegraded: false,
+    reconnectRealtime: vi.fn(async () => {}),
+    ...overrides,
+  } as ReturnType<typeof useAppContext>;
+}
 
-  it('SHA-256 hash differs from the raw key', async () => {
-    // The stored value must not equal the plaintext (obvious, but pinned).
-    const rawKey = 'lh_plaintext_key_value';
-    // Simulate hash (in tests we just verify they differ; real hash is via SubtleCrypto)
-    const fakeHash = 'aabbccdd' + rawKey.length.toString();
-    expect(fakeHash).not.toBe(rawKey);
-  });
-});
-
-// =========================================================================
-// 2. ModuleSwitcher: Hub always visible; CoachByte/ChefByte require activation
-// =========================================================================
-
-describe('spec: ModuleSwitcher filters by activations', () => {
-  it('hub is always included regardless of activations', () => {
-    const activations = { coachbyte: false, chefbyte: false };
-    const modules = [
-      { id: 'hub', requiresActivation: false },
-      { id: 'coachbyte', requiresActivation: true },
-      { id: 'chefbyte', requiresActivation: true },
-    ];
-    const visible = modules.filter((m) => !m.requiresActivation || activations[m.id as keyof typeof activations]);
-    expect(visible.map((m) => m.id)).toContain('hub');
-    expect(visible.map((m) => m.id)).not.toContain('coachbyte');
-    expect(visible.map((m) => m.id)).not.toContain('chefbyte');
-  });
-
-  it('activated modules appear in switcher', () => {
-    const activations = { coachbyte: true, chefbyte: false };
-    const modules = [
-      { id: 'hub', requiresActivation: false },
-      { id: 'coachbyte', requiresActivation: true },
-      { id: 'chefbyte', requiresActivation: true },
-    ];
-    const visible = modules.filter((m) => !m.requiresActivation || activations[m.id as keyof typeof activations]);
-    expect(visible.map((m) => m.id)).toContain('hub');
-    expect(visible.map((m) => m.id)).toContain('coachbyte');
-    expect(visible.map((m) => m.id)).not.toContain('chefbyte');
+beforeEach(() => {
+  vi.clearAllMocks();
+  authCallbacks.current = null;
+  mockSupabase.auth.onAuthStateChange.mockImplementation((cb: (event: string, session: unknown) => void) => {
+    authCallbacks.current = cb;
+    return { data: { subscription: { unsubscribe: vi.fn() } } };
   });
 });
 
 // =========================================================================
-// 3. OfflineIndicator: renders when online=false
+// ModuleSwitcher: Hub always visible; CoachByte/ChefByte require activation.
+//   Renders the REAL <ModuleSwitcher>, which does:
+//     allModules.filter(m => m.appName === null || activations[m.appName])
+//   If that filter regresses, the visible button set changes → RED.
 // =========================================================================
 
-describe('spec: OfflineIndicator shown when offline', () => {
-  it('AppContext online=false causes offline state to be truthy', () => {
-    // Simulate the navigator.onLine=false path that AppProvider tracks.
-    const onlineState = false;
-    expect(onlineState).toBe(false);
-    // In the real component: if (!online) render <OfflineIndicator />
-    const shouldShowIndicator = !onlineState;
-    expect(shouldShowIndicator).toBe(true);
+describe('spec: ModuleSwitcher filters by activations (real component)', () => {
+  function renderSwitcher() {
+    return render(
+      <MemoryRouter initialEntries={['/hub']}>
+        <ModuleSwitcher />
+      </MemoryRouter>,
+    );
+  }
+
+  it('shows only Hub when no app is activated', () => {
+    mockUseAppContext.mockReturnValue(makeCtx({ activations: { coachbyte: false, chefbyte: false } }));
+    renderSwitcher();
+    expect(screen.getByRole('button', { name: 'Hub' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'CoachByte' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'ChefByte' })).not.toBeInTheDocument();
   });
 
-  it('AppContext online=true hides the offline indicator', () => {
-    const onlineState = true;
-    const shouldShowIndicator = !onlineState;
-    expect(shouldShowIndicator).toBe(false);
+  it('shows an activated module alongside the always-on Hub', () => {
+    mockUseAppContext.mockReturnValue(makeCtx({ activations: { coachbyte: true, chefbyte: false } }));
+    renderSwitcher();
+    expect(screen.getByRole('button', { name: 'Hub' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'CoachByte' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'ChefByte' })).not.toBeInTheDocument();
   });
 });
 
 // =========================================================================
-// 4. Session expiry: null session arriving AFTER initial load → notification
-//    (not if SIGNED_OUT event fires — that's expected)
+// OfflineIndicator: renders the offline banner only when online === false.
+//   Renders the REAL <OfflineIndicator>. If the `if (!online)` gate regresses
+//   (e.g. inverted, or banner removed), these assertions go RED.
 // =========================================================================
 
-describe('spec: session expiry detection', () => {
-  it('null session after initial load triggers expiry (not SIGNED_OUT) path', () => {
-    // The AuthProvider checks: if (initialLoadComplete && session === null && event !== 'SIGNED_OUT')
-    const initialLoadComplete = true;
-    const session: null | { user: { id: string } } = null;
-    const event: string = 'TOKEN_REFRESHED'; // not SIGNED_OUT
-
-    const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
-    expect(isExpired).toBe(true);
+describe('spec: OfflineIndicator shown when offline (real component)', () => {
+  it('renders the "No connection" banner when online=false', () => {
+    mockUseAppContext.mockReturnValue(makeCtx({ online: false }));
+    render(<OfflineIndicator />);
+    expect(screen.getByTestId('offline-banner')).toBeInTheDocument();
+    expect(screen.getByText(/No connection/)).toBeInTheDocument();
   });
 
-  it('SIGNED_OUT event does NOT trigger expiry toast', () => {
-    const initialLoadComplete = true;
-    const session: null | { user: { id: string } } = null;
-    const event = 'SIGNED_OUT';
-
-    const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
-    expect(isExpired).toBe(false);
-  });
-
-  it('null session before initial load does not trigger expiry toast', () => {
-    const initialLoadComplete = false;
-    const session: null | { user: { id: string } } = null;
-    const event: string = 'TOKEN_REFRESHED';
-
-    const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
-    expect(isExpired).toBe(false);
+  it('renders nothing when online=true and realtime is healthy', () => {
+    mockUseAppContext.mockReturnValue(makeCtx({ online: true, realtimeDegraded: false }));
+    const { container } = render(<OfflineIndicator />);
+    expect(container.innerHTML).toBe('');
+    expect(screen.queryByTestId('offline-banner')).not.toBeInTheDocument();
   });
 });
 
 // =========================================================================
-// 5. dayStartHour sourced from profile, not hardcoded
+// Session expiry: a null session AFTER initial load (event !== SIGNED_OUT)
+// surfaces the expiry toast; SIGNED_OUT does NOT. Renders the REAL
+// <AuthProvider> and drives its onAuthStateChange callback — pinning the
+// production guard at AuthProvider.tsx:79
+//   `if (!newSession && initialLoadDone.current && event !== 'SIGNED_OUT')`.
 // =========================================================================
 
-describe('spec: dayStartHour from profile', () => {
-  it('AppProvider exposes dayStartHour from profile query, not a constant', () => {
-    // The spec says dayStartHour comes from profile. We verify the context
-    // shape includes it and that it can be non-zero.
-    const mockContext = {
-      activations: {},
-      online: true,
-      lastSynced: new Date(),
-      dayStartHour: 4, // non-default, proves it's read from the profile
-      refreshActivations: () => {},
-    };
-    expect(mockContext.dayStartHour).toBe(4);
-    expect(typeof mockContext.dayStartHour).toBe('number');
+describe('spec: session expiry detection (real AuthProvider)', () => {
+  function fire(event: string, session: unknown) {
+    if (!authCallbacks.current) throw new Error('onAuthStateChange not registered');
+    authCallbacks.current(event, session);
+  }
+
+  it('TOKEN_REFRESHED with null session after initial load shows the expiry toast', async () => {
+    render(
+      <AuthProvider>
+        <div>child</div>
+      </AuthProvider>,
+    );
+    act(() => fire('INITIAL_SESSION', { user: { id: 'u-hub' } }));
+    act(() => fire('TOKEN_REFRESHED', null));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/session has expired/i);
+    });
   });
 
-  it('dayStartHour=0 is a valid profile setting (not treated as falsy default)', () => {
-    // 0 means midnight. Falsy check would wrongly fall back to a default.
-    const dayStartHour = 0;
-    // Wrong: dayStartHour || 6  → would give 6 for midnight users
-    const wrongDefault = dayStartHour || 6;
-    expect(wrongDefault).toBe(6); // proves why || is wrong
-    // Correct: explicit null check
-    const correct = dayStartHour ?? 6;
-    expect(correct).toBe(0); // midnight is preserved
-  });
-});
+  it('SIGNED_OUT does NOT show the expiry toast (intentional sign-out)', async () => {
+    render(
+      <AuthProvider>
+        <div>child</div>
+      </AuthProvider>,
+    );
+    act(() => fire('INITIAL_SESSION', { user: { id: 'u-hub' } }));
+    act(() => fire('SIGNED_OUT', null));
 
-// =========================================================================
-// 6. Extensions without credentials return isError:true on first call
-// =========================================================================
-
-describe('spec: extension without credentials returns isError:true', () => {
-  it('missing credentials path returns isError=true with setup message', () => {
-    // Simulates the pattern every extension tool uses when credentials absent.
-    const hasCredentials = false;
-    const result = hasCredentials
-      ? { content: [{ type: 'text', text: 'ok' }] }
-      : {
-          content: [{ type: 'text', text: 'Credentials not configured. Please set up in Hub → Extensions.' }],
-          isError: true,
-        };
-
-    expect(result.isError).toBe(true);
-    expect((result as any).isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Hub.*Extensions|configure/i);
+    // Give any (incorrect) toast a chance to mount, then assert it didn't.
+    await Promise.resolve();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('present credentials do NOT set isError', () => {
-    const hasCredentials = true;
-    const result = hasCredentials
-      ? { content: [{ type: 'text', text: 'ok' }], isError: undefined }
-      : { content: [], isError: true };
+  it('null session BEFORE initial load (INITIAL_SESSION null) does NOT show the toast', async () => {
+    render(
+      <AuthProvider>
+        <div>child</div>
+      </AuthProvider>,
+    );
+    act(() => fire('INITIAL_SESSION', null));
 
-    expect(result.isError).not.toBe(true);
+    await Promise.resolve();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

@@ -1,22 +1,35 @@
 /**
  * Spec-vs-implementation tests — CoachByte
  *
- * Each test pins one spec claim from docs/apps/coachbyte.md.
- * These tests MUST FAIL if the implementation drifts from the spec.
+ * Each test pins one spec claim from docs/apps/coachbyte.md and drives a REAL
+ * imported production symbol so the assertion can turn RED when that symbol
+ * regresses. Claims with no web-side production hook (DB-enforced behaviour)
+ * are intentionally NOT faked here — they are exercised by pgTAP, and a
+ * tautological re-implementation in this suite would only give a false sense
+ * of coverage. See the per-claim notes below.
  *
  * Spec claims covered:
- *   1. Epley 1RM: 1-rep sets use actual weight (not formula) — spec + impl agree
- *   2. Epley 1RM: 0-rep (failed) sets → 0 (excluded from PR tracking)
- *   3. Epley 1RM: multi-rep sets use load × (1 + reps/30), rounded
- *   4. resolvePercentLoad: rounds to nearest 5 lbs
- *   5. Sequential set completion: lowest-order incomplete set is next
- *   6. Keyset pagination: results DESC by plan_date, cursor is last date
- *   7. History filters empty days (zero completed sets)
- *   8. Exercise uniqueness is case-insensitive per user
+ *   1. Epley 1RM: 1-rep sets use actual weight (not formula)  → epley1RM
+ *   2. Epley 1RM: 0-rep (failed) sets → 0                      → epley1RM
+ *   3. Epley 1RM: multi-rep sets use load × (1 + reps/30)      → epley1RM
+ *   4. Keyset pagination: DESC by plan_date, cursor = last row → loadHistoryPage
+ *   5. History per-day completed_count rollup (drives the     → loadHistoryPage
+ *      "empty days filtered out" UI rule, spec line 73/101)
+ *
+ * DB-only behaviours (NOT pinned here — no falsifiable web symbol exists; the
+ * audit proved a re-implemented copy stays green when the real DB function
+ * breaks, so these would be fake "tests"):
+ *   • Sequential set completion / lowest-order pick — `private.complete_next_set`
+ *     (coachbyte.md:15). Covered by supabase/tests/coachbyte/complete_next_set.test.sql.
+ *   • Exercise uniqueness `UNIQUE(user_id, LOWER(name))` (coachbyte.md:84) — DB
+ *     constraint. Covered by pgTAP.
+ *   • `resolvePercentLoad` rounding — lives in @luna-hub/app-tools (MCP plan
+ *     materialization); the web app never calls it. Covered by app-tools tests.
  */
 
 import { describe, it, expect } from 'vitest';
 import { epley1RM } from '@/shared/epley';
+import { loadHistoryPage } from '@/pages/coachbyte/HistoryPage';
 
 // =========================================================================
 // 1. Epley: 1-rep sets use ACTUAL WEIGHT (spec + impl agree)
@@ -74,128 +87,117 @@ describe('spec: Epley 1RM formula for multi-rep sets', () => {
 });
 
 // =========================================================================
-// 4. resolvePercentLoad: rounds to nearest 5 lbs
-//    (mirrors the app-tools epley.ts implementation)
+// 4 & 5. Keyset pagination + empty-day completed_count rollup
+//
+// Drives the REAL `loadHistoryPage` loader (the exact queryFn the History
+// page runs) through an injected fake PostgREST query builder. We assert the
+// production logic, not a copy of it:
+//   • cursor is derived as the plan_date of the LAST returned row (claim 4)
+//   • `.order('plan_date', { ascending:false })` is requested — DESC (claim 4)
+//   • `.lt('plan_date', cursor)` is applied only when a cursor is passed (claim 4)
+//   • per-plan completed_count is rolled up from the completed_sets rows, so a
+//     plan with zero completed sets reports completed_count:0 — the value the
+//     History UI filters on to hide empty days (claim 5, coachbyte.md:73/101)
+//
+// If loadHistoryPage stops ordering DESC, mis-derives the cursor, or breaks the
+// count rollup, these go RED.
 // =========================================================================
 
-function resolvePercentLoad(percent: number, e1rm: number): number {
-  return Math.round(((percent / 100) * e1rm) / 5) * 5;
+/**
+ * Minimal chainable PostgREST builder stub. Records the `.order`/`.lt` calls
+ * loadHistoryPage makes and resolves to a canned `{ data }` payload keyed by
+ * table name. `await`-able (thenable) like a real Supabase query.
+ */
+function makeFakeCoachbyteClient(tables: Record<string, unknown[]>) {
+  const calls = { order: [] as Array<{ col: string; opts: unknown }>, lt: [] as Array<{ col: string; val: unknown }> };
+  function builder(table: string) {
+    const data = tables[table] ?? [];
+    const chain: Record<string, unknown> = {};
+    const passthrough = () => chain;
+    chain.select = passthrough;
+    chain.eq = passthrough;
+    chain.in = passthrough;
+    chain.limit = passthrough;
+    chain.order = (col: string, opts: unknown) => {
+      calls.order.push({ col, opts });
+      return chain;
+    };
+    chain.lt = (col: string, val: unknown) => {
+      calls.lt.push({ col, val });
+      return chain;
+    };
+    // Thenable: `await query` resolves to { data, error }.
+    chain.then = (resolve: (v: { data: unknown[]; error: null }) => unknown) => resolve({ data, error: null });
+    return chain;
+  }
+  const client = { schema: () => ({ from: (table: string) => builder(table) }) };
+  return { client: client as never, calls };
 }
 
-describe('spec: resolvePercentLoad rounds to nearest 5 lbs', () => {
-  it('85% of 371 lb = 315 (nearest 5)', () => {
-    expect(resolvePercentLoad(85, 371)).toBe(315);
+describe('spec: history keyset pagination (loadHistoryPage)', () => {
+  it('derives the cursor as the plan_date of the last returned row (DESC)', async () => {
+    const { client, calls } = makeFakeCoachbyteClient({
+      daily_plans: [
+        { plan_id: 'p1', plan_date: '2026-04-30', summary: 'a' },
+        { plan_id: 'p2', plan_date: '2026-04-28', summary: 'b' },
+        { plan_id: 'p3', plan_date: '2026-04-25', summary: 'c' },
+      ],
+      planned_sets: [],
+      completed_sets: [],
+    });
+
+    const page = await loadHistoryPage('u-1', null, client);
+
+    // Cursor MUST be the last row's plan_date — not the first, not a constant.
+    expect(page.cursor).toBe('2026-04-25');
+    // Ordering is requested DESC (ascending:false). If prod flips to ASC → RED.
+    expect(calls.order).toContainEqual({ col: 'plan_date', opts: { ascending: false } });
+    // First page (null cursor) must NOT add a .lt() bound.
+    expect(calls.lt).toHaveLength(0);
   });
 
-  it('100% of 200 lb = 200', () => {
-    expect(resolvePercentLoad(100, 200)).toBe(200);
+  it('applies .lt(plan_date, cursor) only when a cursor is supplied', async () => {
+    const { client, calls } = makeFakeCoachbyteClient({
+      daily_plans: [{ plan_id: 'p9', plan_date: '2026-04-20', summary: null }],
+      planned_sets: [],
+      completed_sets: [],
+    });
+
+    await loadHistoryPage('u-1', '2026-04-25', client);
+
+    expect(calls.lt).toContainEqual({ col: 'plan_date', val: '2026-04-25' });
   });
 
-  it('result is always a multiple of 5', () => {
-    const cases: Array<[number, number]> = [
-      [70, 300],
-      [80, 225],
-      [90, 400],
-      [75, 355],
-    ];
-    for (const [pct, e1rm] of cases) {
-      expect(resolvePercentLoad(pct, e1rm) % 5).toBe(0);
-    }
-  });
-
-  it('rounds 0.85 * 301 = 255.85 → nearest 5 = 255 (not 256)', () => {
-    expect(resolvePercentLoad(85, 301)).toBe(255);
-  });
-});
-
-// =========================================================================
-// 5. Sequential set completion — lowest order wins
-// =========================================================================
-
-describe('spec: sequential set completion (lowest-order incomplete set)', () => {
-  it('selects the minimum-order incomplete set', () => {
-    const plannedSets = [
-      { set_id: 'a', order: 2, completed: false },
-      { set_id: 'b', order: 1, completed: false },
-      { set_id: 'c', order: 3, completed: false },
-    ];
-    const incomplete = plannedSets.filter((s) => !s.completed);
-    const next = incomplete.reduce((min, s) => (s.order < min.order ? s : min));
-    expect(next.set_id).toBe('b');
-    expect(next.order).toBe(1);
-  });
-
-  it('skips already-completed sets', () => {
-    const plannedSets = [
-      { set_id: 'a', order: 1, completed: true },
-      { set_id: 'b', order: 2, completed: false },
-      { set_id: 'c', order: 3, completed: false },
-    ];
-    const incomplete = plannedSets.filter((s) => !s.completed);
-    const next = incomplete.reduce((min, s) => (s.order < min.order ? s : min));
-    expect(next.set_id).toBe('b');
+  it('returns null cursor / empty days when there are no plans', async () => {
+    const { client } = makeFakeCoachbyteClient({ daily_plans: [], planned_sets: [], completed_sets: [] });
+    const page = await loadHistoryPage('u-1', null, client);
+    expect(page.days).toEqual([]);
+    expect(page.cursor).toBeNull();
+    expect(page.hasMore).toBe(false);
   });
 });
 
-// =========================================================================
-// 6. Keyset pagination: DESC by plan_date, cursor is last visible date
-// =========================================================================
+describe('spec: history per-day completed_count rollup (empty-day filter source)', () => {
+  it('rolls completed_sets rows up per plan; a plan with no completed sets reports 0', async () => {
+    const { client } = makeFakeCoachbyteClient({
+      daily_plans: [
+        { plan_id: 'busy', plan_date: '2026-04-30', summary: null },
+        { plan_id: 'empty', plan_date: '2026-04-29', summary: null },
+      ],
+      planned_sets: [{ plan_id: 'busy' }, { plan_id: 'busy' }, { plan_id: 'empty' }],
+      // 3 completed rows for 'busy', NONE for 'empty'.
+      completed_sets: [{ plan_id: 'busy' }, { plan_id: 'busy' }, { plan_id: 'busy' }],
+    });
 
-describe('spec: history keyset pagination', () => {
-  it('cursor is the plan_date of the last result row', () => {
-    const page1 = [{ plan_date: '2026-04-30' }, { plan_date: '2026-04-28' }, { plan_date: '2026-04-25' }];
-    const cursor = page1[page1.length - 1].plan_date;
-    expect(cursor).toBe('2026-04-25');
-  });
+    const page = await loadHistoryPage('u-1', null, client);
+    const busy = page.days.find((d) => d.plan_id === 'busy');
+    const empty = page.days.find((d) => d.plan_id === 'empty');
 
-  it('next page rows are strictly before the cursor', () => {
-    const cursor = '2026-04-25';
-    const simulatedNextPage = [{ plan_date: '2026-04-23' }, { plan_date: '2026-04-20' }];
-    for (const row of simulatedNextPage) {
-      expect(row.plan_date < cursor).toBe(true);
-    }
-  });
-
-  it('results within a page are in descending order (newest first)', () => {
-    const page = ['2026-04-30', '2026-04-28', '2026-04-25'];
-    for (let i = 0; i < page.length - 1; i++) {
-      expect(page[i] > page[i + 1]).toBe(true);
-    }
-  });
-});
-
-// =========================================================================
-// 7. History filters empty days (zero completed sets)
-// =========================================================================
-
-describe('spec: history filters out days with zero completed sets', () => {
-  it('days with 0 completed sets are excluded', () => {
-    const days = [
-      { plan_date: '2026-04-30', completedSetCount: 3 },
-      { plan_date: '2026-04-29', completedSetCount: 0 },
-      { plan_date: '2026-04-28', completedSetCount: 5 },
-      { plan_date: '2026-04-27', completedSetCount: 0 },
-    ];
-    const visible = days.filter((d) => d.completedSetCount > 0);
-    expect(visible).toHaveLength(2);
-    expect(visible.map((d) => d.plan_date)).toEqual(['2026-04-30', '2026-04-28']);
-  });
-});
-
-// =========================================================================
-// 8. Exercise uniqueness is case-insensitive per user
-// =========================================================================
-
-describe('spec: exercise uniqueness is case-insensitive', () => {
-  it('LOWER(name) treats "bench press" and "Bench Press" as duplicates', () => {
-    const existing = 'bench press';
-    const candidate = 'Bench Press';
-    expect(candidate.toLowerCase()).toBe(existing.toLowerCase());
-  });
-
-  it('different exercises are allowed side-by-side', () => {
-    const existing = 'squat';
-    const candidate = 'Deadlift';
-    expect(candidate.toLowerCase()).not.toBe(existing.toLowerCase());
+    // The count rollup is the production value the History list filters on
+    // (filteredDays = allDays.filter(d => d.completed_count > 0)). If the
+    // rollup miscounts, the "empty days hidden" behaviour breaks → RED.
+    expect(busy?.completed_count).toBe(3);
+    expect(empty?.completed_count).toBe(0);
+    expect(busy?.planned_count).toBe(2);
   });
 });
