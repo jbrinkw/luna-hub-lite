@@ -72,6 +72,101 @@ function makeErrorCtx(userId = 'user-test'): ToolContext {
 }
 
 // --------------------------------------------------------------------------
+// A supabase context where every DB call SUCCEEDS.
+//
+// This is the counterpart to makeErrorCtx and is what makes the convention
+// test real rather than tautological. makeErrorCtx forces every handler down
+// its error branch, so the isError assertions there only prove "the error
+// wrapper has the isError shape" — they would stay green even if a handler's
+// entire body were `return toolError('boom')`. The positive cases below feed
+// each handler a VALID call + a success-returning mock and assert it reaches
+// its SUCCESS branch (isError falsy + expected data surfaced). The PAIR
+// (success-on-valid + isError-on-failure) is the actual guard.
+//
+// rowData    — returned by every chain terminal (.single/.maybeSingle/await).
+//              It is the UNION of fields the table-pattern handlers read off a
+//              row, so one fixture serves them all.
+// rpcData    — returned by .rpc(). Per-handler because the post-processing
+//              differs (complete_next_set expects an array row with
+//              completed=true; log_set's ensure_daily_plan_admin expects
+//              { plan_id }; consume/mark_done pass the value straight through).
+// --------------------------------------------------------------------------
+
+const SUCCESS_ROW = {
+  // add_stock (existing-lot lookup + merge update) / log_set insert
+  lot_id: 'lot-1',
+  qty_containers: 3,
+  expires_on: null,
+  location_id: 'loc-1',
+  completed_set_id: 'cset-1',
+  completed_at: '2026-06-14T12:00:00Z',
+  // create_recipe / create_product / update_product / set_price
+  recipe_id: 'rec-1',
+  product_id: 'prod-1',
+  name: 'Mock Row',
+  barcode: null,
+  base_servings: 2,
+  active_time: null,
+  total_time: null,
+  instructions: null,
+  price: 2.99,
+  // add_meal
+  meal_id: 'meal-1',
+  logical_date: '2026-06-14',
+  meal_prep: false,
+  servings: 1,
+  // update_summary
+  plan_id: 'plan-1',
+  summary: 'Good session',
+};
+
+function makeSuccessCtx(rpcData: unknown = SUCCESS_ROW, userId = 'user-test'): ToolContext {
+  const chainOk = () => {
+    const t: any = {};
+    for (const m of [
+      'select',
+      'eq',
+      'is',
+      'order',
+      'limit',
+      'update',
+      'insert',
+      'not',
+      'ilike',
+      'gt',
+      'neq',
+      'in',
+      'lte',
+      'gte',
+      'delete',
+      'or',
+      'filter',
+      'range',
+      'returns',
+    ]) {
+      t[m] = vi.fn(() => t);
+    }
+    t.single = vi.fn(() => Promise.resolve({ data: SUCCESS_ROW, error: null }));
+    t.maybeSingle = vi.fn(() => Promise.resolve({ data: SUCCESS_ROW, error: null }));
+    // Awaited-directly chains (e.g. recipe_ingredients.insert(...), .or(...))
+    // resolve to a non-empty success list.
+    t.then = (resolve: (v: any) => void) => resolve({ data: [SUCCESS_ROW], error: null });
+    return t;
+  };
+
+  const supabase: any = {
+    schema: vi.fn(() => ({
+      from: vi.fn(() => chainOk()),
+      rpc: vi.fn(() => Promise.resolve({ data: rpcData, error: null })),
+    })),
+    from: vi.fn(() => chainOk()),
+    rpc: vi.fn(() => Promise.resolve({ data: rpcData, error: null })),
+  };
+
+  return { userId, supabase };
+}
+
+// --------------------------------------------------------------------------
 // Minimal valid args for each tool (enough to pass input validation)
 // --------------------------------------------------------------------------
 
@@ -148,6 +243,34 @@ function assertIsError(result: any, toolName: string) {
   ).toBe(true);
 }
 
+/**
+ * Assert a SUCCESS shape: isError must be falsy (undefined per the toolSuccess
+ * helper, never true) and content[0].text must contain every expected
+ * substring. The substring check is what makes this catch a body swapped to
+ * `return toolError('boom')`: a forced error would (a) set isError=true and
+ * (b) put the error message in content[0].text, so the expected success
+ * fragments would be absent — failing on both counts.
+ */
+function assertIsSuccess(result: any, toolName: string, expectedSubstrings: string[]) {
+  expect(result, `${toolName}: handler must return a result`).toBeDefined();
+  expect(
+    result.isError,
+    `${toolName}: valid call must NOT be an error (got isError=${result.isError}, text=${JSON.stringify(
+      result?.content?.[0]?.text,
+    )})`,
+  ).not.toBe(true);
+  expect(Array.isArray(result.content), `${toolName}: result.content must be an array`).toBe(true);
+  const text = result.content[0]?.text;
+  expect(typeof text === 'string' && text.length > 0, `${toolName}: content[0].text must be a non-empty string`).toBe(
+    true,
+  );
+  for (const sub of expectedSubstrings) {
+    expect(text.includes(sub), `${toolName}: success output must surface "${sub}" (got ${JSON.stringify(text)})`).toBe(
+      true,
+    );
+  }
+}
+
 // =========================================================================
 // ChefByte tool error paths
 // =========================================================================
@@ -176,6 +299,130 @@ describe('spec: COACHBYTE tools return isError:true on DB failure', () => {
       assertIsError(result, toolName);
     });
   }
+});
+
+// =========================================================================
+// Positive (success-path) assertions — the half that makes this test REAL.
+//
+// Each case feeds a VALID call + makeSuccessCtx (every DB call succeeds) and
+// asserts the handler reaches its SUCCESS branch: isError falsy AND the
+// expected payload surfaced. Without these, replacing any handler body with
+// `return toolError('boom')` would leave the suite green (makeErrorCtx never
+// reaches the success branch). With them, that swap fails here.
+//
+// Scope: a representative high-value subset — the mutations across BOTH query
+// patterns (RPC-based: consume/mark_done/complete_next_set; table
+// insert/update: add_stock/add_meal/create_recipe/create_product/
+// update_product/update_summary/set_price/log_set). Read-only getters and the
+// remaining delete/shopping handlers are intentionally out of scope here;
+// their success paths are exercised by the live-DB integration suite
+// (integration/chefbyte-tools.test.ts, coachbyte-tools.test.ts).
+// =========================================================================
+
+// A real UUID so resolveExerciseRef short-circuits (no name→id DB lookup).
+const EX_UUID = '11111111-2222-3333-4444-555555555555';
+
+describe('spec: CHEFBYTE mutations return SUCCESS on a valid call', () => {
+  it('CHEFBYTE_consume → success surfaces RPC result', async () => {
+    const ctx = makeSuccessCtx({ status: 'consumed', stock_remaining: 2 });
+    const result = await chefbyteTools['CHEFBYTE_consume']!.handler(
+      { product_id: 'prod-1', qty: 1, unit: 'container' } as any,
+      ctx,
+    );
+    assertIsSuccess(result, 'CHEFBYTE_consume', ['consumed', 'stock_remaining']);
+  });
+
+  it('CHEFBYTE_add_stock → success surfaces added lot', async () => {
+    const result = await chefbyteTools['CHEFBYTE_add_stock']!.handler(
+      { product_id: 'prod-1', qty_containers: 1, location_id: 'loc-1' } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'CHEFBYTE_add_stock', ['Added 1 container(s)', 'lot-1']);
+  });
+
+  it('CHEFBYTE_add_meal → success surfaces created meal entry', async () => {
+    const result = await chefbyteTools['CHEFBYTE_add_meal']!.handler(
+      { recipe_id: 'rec-1', servings: 1, logical_date: '2026-06-14' } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'CHEFBYTE_add_meal', ['Meal plan entry added', 'meal-1']);
+  });
+
+  it('CHEFBYTE_create_recipe → success surfaces created recipe', async () => {
+    const result = await chefbyteTools['CHEFBYTE_create_recipe']!.handler(
+      {
+        name: 'Test Recipe',
+        base_servings: 2,
+        ingredients: [{ product_id: 'prod-1', quantity: 1, unit: 'container' }],
+      } as any,
+      makeSuccessCtx(),
+    );
+    // Fragments avoid the embedded double-quote (JSON-escaped in the payload)
+    // while still pinning the message + ingredient count.
+    assertIsSuccess(result, 'CHEFBYTE_create_recipe', ['Test Recipe', 'created with 1 ingredient(s)']);
+  });
+
+  it('CHEFBYTE_create_product → success surfaces created product', async () => {
+    const result = await chefbyteTools['CHEFBYTE_create_product']!.handler(
+      { name: 'Test Product', servings_per_container: 1 } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'CHEFBYTE_create_product', ['Mock Row', 'created']);
+  });
+
+  it('CHEFBYTE_update_product → success surfaces updated product', async () => {
+    const result = await chefbyteTools['CHEFBYTE_update_product']!.handler(
+      { product_id: 'prod-1', name: 'Renamed' } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'CHEFBYTE_update_product', ['Mock Row', 'updated', 'fields_updated']);
+  });
+
+  it('CHEFBYTE_set_price → success surfaces new price', async () => {
+    const result = await chefbyteTools['CHEFBYTE_set_price']!.handler(
+      { product_id: 'prod-1', price: 2.99 } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'CHEFBYTE_set_price', ['set to $2.99']);
+  });
+
+  it('CHEFBYTE_mark_done → success surfaces RPC result', async () => {
+    const ctx = makeSuccessCtx({ success: true, meal_id: 'meal-1', mode: 'regular', completed_at: 'now' });
+    const result = await chefbyteTools['CHEFBYTE_mark_done']!.handler({ meal_id: 'meal-1' } as any, ctx);
+    assertIsSuccess(result, 'CHEFBYTE_mark_done', ['regular', 'meal-1']);
+  });
+});
+
+describe('spec: COACHBYTE mutations return SUCCESS on a valid call', () => {
+  it('COACHBYTE_complete_next_set → success surfaces rest time', async () => {
+    // RPC returns RETURNS TABLE(rest_seconds, completed) → row 0 with completed=true.
+    const ctx = makeSuccessCtx([{ rest_seconds: 90, completed: true }]);
+    const result = await coachbyteTools['COACHBYTE_complete_next_set']!.handler(
+      { plan_id: 'plan-1', reps: 5, load: 185 } as any,
+      ctx,
+    );
+    assertIsSuccess(result, 'COACHBYTE_complete_next_set', ['Set completed', '90']);
+  });
+
+  it('COACHBYTE_update_summary → success surfaces summary', async () => {
+    const result = await coachbyteTools['COACHBYTE_update_summary']!.handler(
+      { plan_id: 'plan-1', summary: 'Good session' } as any,
+      makeSuccessCtx(),
+    );
+    assertIsSuccess(result, 'COACHBYTE_update_summary', ['Summary updated', 'Good session']);
+  });
+
+  it('COACHBYTE_log_set → success surfaces logged set', async () => {
+    // ensure_daily_plan_admin RPC must return { plan_id }; the completed_sets
+    // insert terminal returns SUCCESS_ROW (completed_set_id). exercise_id is a
+    // UUID so resolveExerciseRef short-circuits without a name lookup.
+    const ctx = makeSuccessCtx({ plan_id: 'plan-1' });
+    const result = await coachbyteTools['COACHBYTE_log_set']!.handler(
+      { exercise_id: EX_UUID, reps: 5, load: 185 } as any,
+      ctx,
+    );
+    assertIsSuccess(result, 'COACHBYTE_log_set', ['Ad-hoc set logged', 'cset-1']);
+  });
 });
 
 // =========================================================================
