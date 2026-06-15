@@ -1673,6 +1673,7 @@ export type Database = {
         }
         Returns: {
           completed: boolean
+          completed_set_id: string
           rest_seconds: number
         }[]
       }
@@ -1685,6 +1686,7 @@ export type Database = {
         }
         Returns: {
           completed: boolean
+          completed_set_id: string
           rest_seconds: number
         }[]
       }

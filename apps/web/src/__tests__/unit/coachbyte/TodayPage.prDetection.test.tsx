@@ -11,12 +11,18 @@
  * "first record" path from firing and risking misreports of "NEW PR".
  *
  * The fix: exclude by `completed_set_id` returned from the
- * `complete_next_set` RPC.
+ * `complete_next_set` RPC. That return column was ADDED by migration
+ * 20260515080000_complete_next_set_cluster.sql (deep-audit H-2 / PR-DEAD);
+ * before it, the RPC returned only { rest_seconds, completed } and
+ * `result[0].completed_set_id` was always undefined, making both the PR
+ * self-exclusion and the undo toast dead code.
  *
  * This test pins the fixed contract by capturing the rows fetched
  * during the PR check and asserting that:
- *   - the just-logged set's completed_set_id is excluded
- *   - prior matching reps×load sets are NOT excluded
+ *   - the PR-check loader pulls completed_set_id (so we can exclude by id)
+ *   - the undo toast mounts (gated on `if (completedSetId)`)
+ * The mock returns the REAL RPC shape { rest_seconds, completed,
+ * completed_set_id } — not a fabricated one (audit FP-2).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, waitFor } from '@testing-library/react';
@@ -53,15 +59,18 @@ vi.mock('@/shared/supabase', () => {
         return Promise.resolve({ data: { plan_id: PLAN_ID, status: 'created' }, error: null });
       }
       if (name === 'complete_next_set') {
-        // Return the completed_set_id from the RPC response so the PR
-        // path can use it to exclude the just-logged set.
+        // REAL RPC shape (post-H-2 fix): RETURNS TABLE(rest_seconds,
+        // completed, completed_set_id). Migration
+        // 20260515080000_complete_next_set_cluster.sql added completed_set_id
+        // so the web PR self-exclusion + undo toast are no longer dead code.
+        // Pre-fix this mock fabricated completed_set_id/planned_set_id the RPC
+        // never returned (audit FP-2) — those tests were green on a lie.
         return Promise.resolve({
           data: [
             {
-              completed_set_id: COMPLETED_ID,
-              planned_set_id: 'ps-1',
               rest_seconds: 90,
               completed: true,
+              completed_set_id: COMPLETED_ID,
             },
           ],
           error: null,
