@@ -13,7 +13,7 @@ per-result POST (:meth:`CloudClient.post_livetrack_session_update`).
 
 Poll cadence (from plan §5):
   * ``ACTIVE_POLL_S`` (500ms) when a session is known active.
-  * ``IDLE_POLL_S`` (2s)     when the last poll returned None.
+  * ``IDLE_POLL_S`` (30s)    when the last poll returned None.
   * Exponential backoff on HTTP errors (1s → ``MAX_BACKOFF_S`` cap).
 
 Thread safety: the snapshot is a plain dict behind a :class:`threading.Lock`.
@@ -43,7 +43,12 @@ log = logging.getLogger(__name__)
 
 # Poll cadences.
 ACTIVE_POLL_S = 0.5
-IDLE_POLL_S = 2.0
+# IDLE_POLL_S was 2.0: the idle "is a pairing session active?" poll ran every 2s
+# (~43K edge-fn calls/day) and was the dominant driver of the Supabase
+# edge-function quota blowout (550K/cycle cap, hit twice). 30s cuts idle calls
+# ~15x while keeping pairing-start detection acceptable; ACTIVE_POLL_S stays 0.5s
+# so an in-progress pairing is still responsive. See POLLING_REFACTOR_PLAN.md §0.
+IDLE_POLL_S = 30.0
 
 # HTTP-error exponential backoff (between failed polls only).
 INITIAL_BACKOFF_S = 1.0

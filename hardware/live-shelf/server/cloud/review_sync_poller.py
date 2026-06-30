@@ -78,7 +78,10 @@ from .client import CloudError
 log = logging.getLogger(__name__)
 
 
-POLL_INTERVAL_S = 30.0
+# 30.0 -> 60.0 (POLLING_REFACTOR_PLAN.md §0): Class-A mirror poll for resolved
+# classifier reviews; returns "nothing changed" ~99% of the time and 60s
+# staleness is fine. Part of pulling org edge-fn usage back under the 550K cap.
+POLL_INTERVAL_S = 60.0
 INITIAL_BACKOFF_S = 1.0
 MAX_BACKOFF_S = 30.0
 _STATE_SCHEMA_VERSION = 1

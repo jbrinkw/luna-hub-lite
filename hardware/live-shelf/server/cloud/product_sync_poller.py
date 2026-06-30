@@ -40,7 +40,11 @@ log = logging.getLogger(__name__)
 
 # Poll cadences (seconds). Kept module-level so tests can patch them to
 # run faster without monkey-patching the class.
-POLL_INTERVAL_S = 30.0
+# 30.0 -> 60.0 (POLLING_REFACTOR_PLAN.md §0): this Class-A catalog-mirror poll
+# returns "nothing changed" ~99% of the time; web-originated product edits
+# tolerate up to 60s of staleness. Halves this poller's edge-fn calls as part of
+# pulling org usage back under the 550K/cycle quota.
+POLL_INTERVAL_S = 60.0
 INITIAL_BACKOFF_S = 1.0
 MAX_BACKOFF_S = 30.0
 
