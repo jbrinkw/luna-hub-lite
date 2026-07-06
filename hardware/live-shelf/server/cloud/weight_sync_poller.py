@@ -76,7 +76,7 @@ from ._kind_translate import (
     pi_to_cloud,
 )
 from .integration import CloudEventEmitter
-from ..types_branded import CloudLotId, InvalidIdError
+from ..types_branded import CloudLotId, InvalidIdError, parse_cloud_lot_id
 
 log = logging.getLogger(__name__)
 
@@ -219,11 +219,16 @@ class WeightSyncPoller(threading.Thread):
         # Pi lots) skipped because >1 active cloud_lots matched on a given
         # tick (G5 fix, 2026-05-15) — operator action required: consolidate
         # the cloud lots, pair them to separate scales, or accept degraded
-        # live-weight tracking for that product.
+        # live-weight tracking for that product. ``skipped_collapsed_count``
+        # counts CLOUD LOTS (C2-03 fix, 2026-06-15) skipped because >1 Pi
+        # `lots` row collapsed onto the SAME cloud_lot_id (the inverse of
+        # G5: one cloud lot, many Pi lots) — emitting both would thrash
+        # ``last_observed_weight_g`` with conflicting weights every tick.
         self._last_tick_stats: dict[str, int] = {
             "candidates": 0,
             "emitted": 0,
             "skipped_ambiguous_count": 0,
+            "skipped_collapsed_count": 0,
         }
 
     # ------------------------------------------------------------------
@@ -239,10 +244,14 @@ class WeightSyncPoller(threading.Thread):
 
         Keys:
           * ``candidates`` — number of rows returned from the candidate fetch
-            (after ambiguity-skip + dedup, before throttle gates).
+            (after ambiguity-skip + collapse-skip + dedup, before throttle
+            gates).
           * ``emitted`` — number of events actually emitted on the last tick.
           * ``skipped_ambiguous_count`` — number of PRODUCTS (not lots)
             skipped because >1 active cloud_lots matched. See G5 (2026-05-15).
+          * ``skipped_collapsed_count`` — number of CLOUD LOTS skipped
+            because >1 Pi `lots` row collapsed onto the same cloud_lot_id
+            (the inverse of G5). See C2-03 (2026-06-15).
         """
         return dict(self._last_tick_stats)
 
@@ -260,6 +269,7 @@ class WeightSyncPoller(threading.Thread):
             "candidates": 0,
             "emitted": 0,
             "skipped_ambiguous_count": 0,
+            "skipped_collapsed_count": 0,
         }
         if not self._emitter.enabled:
             return 0
@@ -527,6 +537,63 @@ class WeightSyncPoller(threading.Thread):
             r["lot_id"] = cloud_lot_id
             shelf_rows.append(r)
 
+        # C2-03 (2026-06-15): collapse guard on the Pi-lot dimension —
+        # the inverse of G5. G5 catches >1 cloud_lots for one product;
+        # this catches >1 Pi `lots` rows that resolve to the SAME
+        # cloud_lot_id (which happens whenever a product has exactly one
+        # active cloud lot but more than one live Pi lot — G5's HAVING
+        # COUNT(*) > 1 on cloud_lots does NOT fire here). Each such Pi
+        # row carries its own ``current_weight_g``; left unguarded they
+        # all flow into the emit loop keyed by the shared cloud_lot_id,
+        # so every tick emits multiple ``live_weight_sync`` events with
+        # CONFLICTING weights for the same cloud lot and the cloud's
+        # ``last_observed_weight_g`` flaps permanently. We can't tell
+        # which physical Pi lot owns the cloud lot's weight, so — exactly
+        # like G5 — we skip ALL Pi rows that share a cloud_lot_id, log a
+        # WARNING naming the cloud_lot_id + the colliding Pi lot_ids, and
+        # bump ``skipped_collapsed_count`` so /healthz surfaces the
+        # operator-action condition (consolidate the Pi lots or pair them
+        # to separate scales).
+        if shelf_rows:
+            rows_by_cloud_lot: dict[str, list[dict]] = {}
+            for r in shelf_rows:
+                cloud_lot_id = r.get("lot_id")
+                if isinstance(cloud_lot_id, str) and cloud_lot_id:
+                    rows_by_cloud_lot.setdefault(cloud_lot_id, []).append(r)
+            collapsed_cloud_lots = {
+                clid: rs
+                for clid, rs in rows_by_cloud_lot.items()
+                if len(rs) > 1
+            }
+            if collapsed_cloud_lots:
+                shelf_rows = [
+                    r
+                    for r in shelf_rows
+                    if r.get("lot_id") not in collapsed_cloud_lots
+                ]
+                for clid, rs in collapsed_cloud_lots.items():
+                    pi_lot_ids = [
+                        r.get("pi_local_lot_id")
+                        for r in rs
+                        if isinstance(r.get("pi_local_lot_id"), str)
+                        and r.get("pi_local_lot_id")
+                    ]
+                    log.warning(
+                        "weight_sync: skipping cloud_lot_id=%s — %d Pi "
+                        "lots collapse onto it with conflicting weights; "
+                        "Pi lot_ids: %s. Operator action: consolidate the "
+                        "Pi lots, pair them to separate scales, or accept "
+                        "degraded weight tracking.",
+                        clid,
+                        len(rs),
+                        pi_lot_ids,
+                    )
+                # Count one tick stat per collapsed CLOUD LOT (the unit
+                # the operator must consolidate), not per Pi lot.
+                self._last_tick_stats["skipped_collapsed_count"] = len(
+                    collapsed_cloud_lots,
+                )
+
         # Dedup: a lot may appear in both branches when a test seeds
         # both a `lots` row and a `scale_pairings` row with the same
         # lot_id. The live_shelf branch already produced an emit with a
@@ -622,26 +689,46 @@ class WeightSyncPoller(threading.Thread):
 
         # Validate that raw_lot_id belongs to the cloud namespace by
         # verifying it in the cloud_lots mirror. This is the critical
-        # boundary: a Pi-local lot_id (from lots.lot_id) would pass a
-        # UUID format check but fail in the cloud apply_live_weight_sync
-        # handler. InvalidIdError → log + skip (same isolation as the
-        # outer tick_once exception handler, but we absorb here so the
-        # log message names the lot).
-        try:
-            cloud_lot_id = CloudLotId(raw_lot_id)  # type: CloudLotId
-            # Lightweight in-process verification: the _fetch_candidates
-            # JOIN already guarantees this came from cloud_lots, so we
-            # promote directly rather than re-querying.  For the
-            # live_scale branch (scale_pairings.lot_id) the FK was
-            # explicitly set to cloud stock_lots.lot_id in migration
-            # 20260429; same guarantee applies.
-        except Exception:  # noqa: BLE001
-            log.warning(
-                "weight_sync: lot_id promotion failed for %r; skipping",
-                raw_lot_id,
-                exc_info=True,
-            )
-            return False
+        # boundary: a Pi-local lot_id (from lots.lot_id) would pass a UUID
+        # format check but fail in the cloud apply_live_weight_sync
+        # handler (root cause of the 'lot_id not found' applied=false
+        # bug). InvalidIdError → log + skip (same isolation as the outer
+        # tick_once exception handler, but we absorb here so the log
+        # message names the lot).
+        #
+        # C2-07 (2026-06-15): this used to be ``CloudLotId(raw_lot_id)``,
+        # a NewType identity cast that can NEVER raise, wrapped in a dead
+        # try/except whose comment falsely claimed "verification". The
+        # cast did nothing — a leaked Pi-local lot_id sailed straight
+        # through. We now run the REAL namespace check via
+        # ``parse_cloud_lot_id`` (verifies presence in the cloud_lots
+        # mirror) for shelf-JOIN rows, where ``cloud_lot_id`` was set by
+        # the _fetch_candidates JOIN and is therefore the right contract
+        # to assert. The live_scale pass-through branch
+        # (scale_pairings.lot_id) carries NO ``cloud_lot_id`` key and is
+        # deliberately NOT mirrored in cloud_lots (the FK to local lots
+        # was dropped in migration 20260429 — pairings.lot_id is set to
+        # the cloud stock_lots.lot_id directly), so re-querying cloud_lots
+        # would wrongly reject every live_scale emit; for that branch we
+        # keep the documented identity promotion.
+        if "cloud_lot_id" in row:
+            try:
+                cloud_lot_id = parse_cloud_lot_id(raw_lot_id, self._conn)
+            except InvalidIdError:
+                log.warning(
+                    "weight_sync: lot_id %r not found in cloud_lots "
+                    "(namespace mismatch — likely a leaked Pi-local "
+                    "lot_id); skipping",
+                    raw_lot_id,
+                    exc_info=True,
+                )
+                return False
+        else:
+            # live_scale pass-through: scale_pairings.lot_id is already
+            # the cloud stock_lots.lot_id (FK dropped, migration
+            # 20260429), and is intentionally absent from the cloud_lots
+            # mirror — promote without a cloud_lots re-query.
+            cloud_lot_id = CloudLotId(raw_lot_id)
 
         if not self._should_emit(
             lot_id=raw_lot_id, weight_g=weight_f, now_mono=now_mono,

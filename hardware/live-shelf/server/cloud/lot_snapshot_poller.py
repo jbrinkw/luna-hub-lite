@@ -241,6 +241,11 @@ class LotSnapshotPoller(threading.Thread):
         self._products_synced = products_synced_event
         self._products_synced_wait_s = float(products_synced_wait_s)
         self._products_synced_wait_done = False
+        # Audit C2-05: cumulative count of product-fallback lot lookups
+        # that were refused because >1 in_flight Pi lot matched the
+        # product (mirrors event_overrides_poller's Gap G3 counter so
+        # /healthz can surface the same ambiguity-skip signal).
+        self._skipped_ambiguous_count = 0
 
     # ------------------------------------------------------------------
     # Public control
@@ -248,6 +253,14 @@ class LotSnapshotPoller(threading.Thread):
 
     def stop(self) -> None:
         self._shutdown.set()
+
+    @property
+    def skipped_ambiguous_count(self) -> int:
+        """C2-05: how many product-fallback lot lookups were refused
+        because more than one in_flight Pi lot matched the product. Read
+        by the health endpoint; non-zero means drift the auto-resolver
+        deliberately declined to guess at."""
+        return self._skipped_ambiguous_count
 
     @property
     def high_watermark(self) -> Optional[str]:
@@ -315,38 +328,77 @@ class LotSnapshotPoller(threading.Thread):
         lots_raw = payload.get("lots")
         lots = lots_raw if isinstance(lots_raw, list) else []
 
-        # Apply deltas + track max(updated_at) across ALL returned rows
-        # (including tombstones — a deleted row still carries the bumped
-        # updated_at and must advance the watermark so we don't re-fetch
-        # it forever). An empty delta leaves the watermark untouched.
+        # Apply deltas + track max(updated_at) across returned rows so we
+        # don't re-fetch them forever. A deleted row still carries the
+        # bumped updated_at and must advance the watermark too. An empty
+        # delta leaves the watermark untouched.
         #
-        # Test cross-reference (audit L11 deferred sibling):
-        #   * ``test_malformed_row_skipped_without_poisoning_batch`` in
-        #     tests/test_lot_snapshot_poller.py — mixed batch.
-        #   * ``test_all_malformed_batch_still_advances_watermark`` —
-        #     all-malformed batch still advances watermark; pins this
-        #     behavior so a future regression that gates the watermark
-        #     advance on apply-success is caught.
+        # Two distinct "row didn't apply" cases — they MUST be treated
+        # differently for the watermark:
+        #
+        #   (a) Malformed row — ``_apply_one`` returns False (bad/missing
+        #       lot_id / product_id / updated_at). This is a *permanent*
+        #       defect: the cloud will never re-send a corrected row under
+        #       the same updated_at, so re-fetching it forever is pure
+        #       waste. The watermark SHOULD advance past it.
+        #       Pinned by ``test_malformed_rows_do_not_poison_watermark_advance``.
+        #
+        #   (b) Apply RAISED a ``sqlite3.Error`` — a *transient/recoverable*
+        #       DB fault (busy lock, disk I/O, deferred-FK hiccup). The row
+        #       is still valid and WILL apply on a later tick. Audit C2-01:
+        #       the cloud delta filter is a strict ``updated_at > watermark``,
+        #       so if we advance the watermark to/past a raised row, that
+        #       row is dropped from every future delta window — permanent
+        #       mirror drift / data loss. So we must NOT advance the
+        #       watermark to or beyond the earliest raised row; it stays
+        #       below that floor and the row is retried next tick.
+        #
+        # Implementation: ``failed_floor`` = min(updated_at) among rows
+        # whose apply raised. The watermark may only advance to the max
+        # updated_at of rows strictly older than that floor. Rows at/after
+        # the floor (including the failed row itself) are held back.
         max_updated_at: Optional[str] = self._state.high_watermark
+        failed_floor: Optional[str] = None
         applied = 0
+        pending_ts: list[str] = []
         for lot in lots:
             if not isinstance(lot, dict):
                 continue
             row_ts = lot.get("updated_at")
-            if isinstance(row_ts, str) and row_ts:
-                if max_updated_at is None or row_ts > max_updated_at:
-                    max_updated_at = row_ts
+            row_ts_str = row_ts if (isinstance(row_ts, str) and row_ts) else None
             try:
-                if self._apply_one(lot):
-                    applied += 1
+                applied_row = self._apply_one(lot)
             except sqlite3.Error:
-                # Single-row failure must not poison the batch. Log + skip.
+                # Transient single-row failure — log, skip, and hold the
+                # watermark below this row so the next tick retries it.
                 log.warning(
-                    "lot_snapshot: apply failed for lot_id=%r",
+                    "lot_snapshot: apply failed for lot_id=%r — "
+                    "holding watermark so it is retried next tick",
                     lot.get("lot_id"),
                     exc_info=True,
                 )
+                if row_ts_str is not None and (
+                    failed_floor is None or row_ts_str < failed_floor
+                ):
+                    failed_floor = row_ts_str
                 continue
+            if applied_row:
+                applied += 1
+            # Applied OR malformed-skip (returned False): both may advance
+            # the watermark. Defer the actual max() until we know the
+            # failed_floor for the whole batch.
+            if row_ts_str is not None:
+                pending_ts.append(row_ts_str)
+
+        # Advance the watermark only across rows strictly older than the
+        # earliest transient failure. This keeps malformed rows (case a)
+        # advancing while pinning recoverable raised rows (case b) inside
+        # the next delta window.
+        for ts_str in pending_ts:
+            if failed_floor is not None and ts_str >= failed_floor:
+                continue
+            if max_updated_at is None or ts_str > max_updated_at:
+                max_updated_at = ts_str
 
         # Success path: persist watermark BEFORE resetting backoff so
         # that an OSError on _state.write (disk-full, read-only mount,
@@ -638,9 +690,14 @@ class LotSnapshotPoller(threading.Thread):
              exact link for catch-all in-flight lots.
           2. Fallback by (product_id, status='in_flight') — covers the
              case where the pickup_event_id link is missing on legacy
-             live-shelf lots.
+             live-shelf lots. Audit C2-05: this fallback is UNSAFE when
+             >1 in_flight lot matches the product (the cloud row doesn't
+             say which one it meant); in that case we DEFER — return None
+             and bump ``skipped_ambiguous_count`` — rather than flipping
+             an arbitrary lot.
 
-        Returns the Pi ``lots.lot_id`` if found, else ``None``.
+        Returns the Pi ``lots.lot_id`` if found, ``None`` if not found OR
+        if the product fallback is ambiguous (>1 in_flight match).
         Callers must hold ``self._db_lock`` if one is configured.
         """
         cl_row = self._conn.execute(
@@ -678,6 +735,40 @@ class LotSnapshotPoller(threading.Thread):
             # Narrowed to in_flight — the dangerous state — an on_shelf
             # lot that the cloud thinks is gone is a separate drift
             # symptom and shouldn't be auto-flagged from this path.
+            #
+            # Audit C2-05: BEFORE picking the most-recent in_flight lot,
+            # count how many in_flight Pi lots exist for this product. If
+            # >1, ``ORDER BY in_flight_since DESC LIMIT 1`` would flip an
+            # ARBITRARY one — and the cloud row that triggered this (a
+            # tombstone, or a reaper in_flight-clear) does not tell us
+            # WHICH of the duplicates it referred to. Flipping the wrong
+            # lot to 'lost'/'out' is silent data corruption. Mirrors the
+            # G3 guard in event_overrides_poller: refuse, log, and DEFER
+            # (return None → caller leaves all candidates untouched). The
+            # exact-link path above (pickup_event_id) is unambiguous and
+            # still resolves the common case; this guard only fires on the
+            # legacy/fallback heuristic where >1 lot genuinely competes.
+            ambiguous_count_row = self._conn.execute(
+                "SELECT COUNT(*) FROM lots "
+                " WHERE product_id = ? "
+                "   AND status = 'in_flight'",
+                (cl_product_id,),
+            ).fetchone()
+            ambiguous_count = (
+                ambiguous_count_row[0]
+                if ambiguous_count_row is not None else 0
+            )
+            if ambiguous_count > 1:
+                self._skipped_ambiguous_count += 1
+                log.warning(
+                    "lot_snapshot: AMBIGUOUS product-fallback for cloud "
+                    "lot %s product_id=%s — %d in_flight Pi lots match "
+                    "and the cloud row's pickup_event_id linked to none; "
+                    "refusing to flip an arbitrary lot — deferring (no "
+                    "mutation). A real per-lot event must disambiguate.",
+                    lot_id, cl_product_id, ambiguous_count,
+                )
+                return None
             pi_row = self._conn.execute(
                 "SELECT lot_id FROM lots "
                 " WHERE product_id = ? "

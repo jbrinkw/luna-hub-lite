@@ -1325,3 +1325,112 @@ def test_g10_no_event_passed_works_for_backcompat(conn, tmp_path):
         # products_synced_event omitted
     )
     poller.tick_once()
+
+
+# ---------------------------------------------------------------------------
+# C2-04 (2026-06-15) — non-empty overrides + empty lots[] must not freeze
+# ---------------------------------------------------------------------------
+#
+# Before the fix, _apply_lot_states early-returned whenever ``lots`` was
+# empty, leaving every override at the TRANSIENT default. The caller treats
+# TRANSIENT as "freeze the watermark", so a batch carrying REAL overrides
+# but an empty ``lots[]`` froze the cursor FOREVER — the same override was
+# re-fetched every tick and never advanced, blocking every newer override
+# behind it. Per the cloud contract (a missing post-reconcile lot row means
+# the cloud tombstoned/never-had the lot), that case is PERMANENT and the
+# watermark MUST advance. The fix removes the early return so the
+# per-override loop classifies each one PERMANENT.
+
+
+def test_overrides_with_empty_lots_advances_watermark_not_frozen(
+    conn, tmp_path, caplog,
+):
+    """C2-04: a batch with a non-empty override but empty lots[] must
+    advance the watermark past it (PERMANENT skip), not freeze forever.
+
+    Mutation check: with the old early-return the watermark stays None
+    (frozen) and this assertion goes RED.
+    """
+    # Product exists on the Pi (so the freeze is NOT a missing-product
+    # TRANSIENT — it is purely the empty-lots[] path under test).
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-empty-lots', 'P', 1000.0, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    conn.commit()
+    state_path = tmp_path / "last_overrides_sync.json"
+
+    payload = _override_payload(
+        "evt-empty", "prod-empty-lots", "cloud-lot-empty", 0.5,
+        updated_at="2026-04-21T12:00:00Z",
+    )
+    # The bug trigger: real override, but the cloud sent NO lots[] rows.
+    payload["lots"] = []
+
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value=payload)
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+
+    with caplog.at_level("WARNING"):
+        applied = poller.tick_once()
+
+    # Nothing applied (no lot to write), but the watermark ADVANCED past
+    # the batch instead of freezing at None forever.
+    assert applied == 0
+    assert poller.high_watermark == "2026-04-21T12:00:00Z", (
+        "watermark must advance past an overrides+empty-lots batch"
+    )
+    # The override was actually classified (not silently dropped): the
+    # PERMANENT 'no matching lot in payload' WARNING was logged for it.
+    assert any(
+        r.levelname == "WARNING"
+        and "no matching lot in payload" in r.getMessage()
+        and "PERMANENT" in r.getMessage()
+        for r in caplog.records
+    ), [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+
+    # Watermark persisted to disk so a restart doesn't re-pull the row.
+    state = json.loads(state_path.read_text())
+    assert state["high_watermark"] == "2026-04-21T12:00:00Z"
+
+    # Second tick: because the watermark advanced, the cloud is queried
+    # from AFTER this batch (the row is not stuck being re-fetched).
+    fake_fetch.return_value = {"overrides": [], "lots": []}
+    poller.tick_once()
+    assert (
+        fake_fetch.call_args_list[-1].kwargs["updated_since"]
+        == "2026-04-21T12:00:00Z"
+    )
+
+
+def test_empty_overrides_and_empty_lots_still_no_churn(conn, tmp_path):
+    """C2-04 regression guard: removing the early return must NOT cause
+    state churn on a genuinely empty batch (no overrides, no lots). The
+    watermark file stays untouched, exactly as before.
+    """
+    _ = _seed_product_and_lot(conn)
+    state_path = tmp_path / "last_overrides_sync.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-21T08:00:00Z"})
+    )
+    before_mtime = state_path.stat().st_mtime_ns
+
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value={"overrides": [], "lots": []})
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    applied = poller.tick_once()
+
+    assert applied == 0
+    assert poller.high_watermark == "2026-04-21T08:00:00Z"
+    assert state_path.stat().st_mtime_ns == before_mtime

@@ -309,7 +309,11 @@ def test_malformed_rows_do_not_poison_watermark_advance(conn, tmp_path):
     p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
     p.tick_once()
 
-    # updated_at values are read before _apply_one, so max is still tracked
+    # Malformed rows return False from _apply_one (they never RAISE), so
+    # they're treated as permanent defects whose updated_at still advances
+    # the watermark — re-fetching them forever would be pure waste. (This
+    # is the deliberate counterpart to C2-01, where a row that RAISES
+    # sqlite3.Error instead holds the watermark back for retry.)
     assert p.high_watermark == "2026-04-23T10:00:00Z"
 
 
@@ -928,3 +932,254 @@ def test_g10_no_event_passed_works_for_backcompat(conn, tmp_path):
         # products_synced_event omitted
     )
     p.tick_once()
+
+
+# ---------------------------------------------------------------------------
+# Audit C2-01 — a row whose ``_apply_one`` RAISES sqlite3.Error must NOT
+# advance the watermark past it. The cloud delta filter is a strict
+# ``updated_at > watermark``; advancing past a transiently-failed row drops
+# it from every future delta window → permanent mirror drift / data loss.
+# The row must be RETRIED on the next tick.
+# ---------------------------------------------------------------------------
+
+
+def test_c2_01_failed_apply_does_not_advance_watermark_and_retries(conn, tmp_path):
+    """Two snapshot rows; the FIRST raises in ``_apply_one``.
+
+    Expected:
+      * watermark does NOT advance to/past the failed row's updated_at;
+      * the failed (and the later, valid) row are re-fetched next tick
+        (cloud filter would skip them if the watermark had advanced);
+      * once the transient fault clears, both rows apply and the
+        watermark finally advances.
+    """
+    state_path = tmp_path / "s.json"
+    bad = _lot("lot-bad", updated_at="2026-04-21T10:00:00Z")
+    good = _lot("lot-good", updated_at="2026-04-22T12:00:00Z")
+    fetch = MagicMock(return_value=_payload(bad, good))
+    p = _poller(MagicMock(), conn, state_path, fetch_fn=fetch)
+
+    # Make ONLY the first row's apply raise a transient sqlite fault.
+    real_apply = p._apply_one
+    fail_for = {"lot-bad"}
+
+    def flaky_apply(lot):
+        if lot.get("lot_id") in fail_for:
+            raise sqlite3.OperationalError("database is locked")
+        return real_apply(lot)
+
+    with patch.object(p, "_apply_one", side_effect=flaky_apply):
+        applied = p.tick_once()
+
+    # Only the good row applied this tick.
+    assert applied == 1
+    assert "lot-good" in _all_cloud_lot_ids(conn)
+    assert "lot-bad" not in _all_cloud_lot_ids(conn)
+
+    # CRITICAL: the watermark must NOT have advanced to/past the failed
+    # row (2026-04-21T10:00:00Z). It must stay strictly below it so the
+    # next delta window re-fetches it. Since the good row is NEWER than
+    # the failed row, the watermark cannot jump to the good row either
+    # (that would orphan the failed row forever).
+    assert p.high_watermark is None or p.high_watermark < "2026-04-21T10:00:00Z", (
+        f"watermark advanced to {p.high_watermark!r}, past the failed row — "
+        "the failed row is now unreachable in every future delta window"
+    )
+    # The on-disk state likewise must not pin a watermark that skips the row.
+    if state_path.exists():
+        saved_hwm = json.loads(state_path.read_text())["high_watermark"]
+        assert saved_hwm is None or saved_hwm < "2026-04-21T10:00:00Z"
+
+    # ---- Next tick: the transient fault has cleared. The poller must
+    # re-fetch the SAME range (updated_since unchanged) and now apply
+    # BOTH rows. This proves the failed row was retried, not silently
+    # skipped forever. ----
+    last_call = fetch.call_args_list[-1]
+    assert last_call.kwargs.get("updated_since") == p.high_watermark
+
+    fail_for.clear()  # fault gone
+    applied2 = p.tick_once()
+
+    assert "lot-bad" in _all_cloud_lot_ids(conn), (
+        "the previously-failed row was never retried — it is lost"
+    )
+    assert "lot-good" in _all_cloud_lot_ids(conn)
+    # Both rows now applied; watermark finally advances to the batch max.
+    assert applied2 >= 1
+    assert p.high_watermark == "2026-04-22T12:00:00Z"
+
+
+def test_c2_01_all_rows_fail_leaves_watermark_untouched(conn, tmp_path):
+    """If EVERY row's apply raises, the watermark must not move at all —
+    not even to the smallest failed updated_at. (Guards a mutation where
+    the failed_floor clamp is dropped and the batch-max leaks through.)"""
+    state_path = tmp_path / "s.json"
+    r1 = _lot("lot-a", updated_at="2026-04-21T10:00:00Z")
+    r2 = _lot("lot-b", updated_at="2026-04-22T12:00:00Z")
+    fetch = MagicMock(return_value=_payload(r1, r2))
+    p = _poller(MagicMock(), conn, state_path, fetch_fn=fetch)
+
+    def always_raise(_lot):
+        raise sqlite3.OperationalError("database is locked")
+
+    with patch.object(p, "_apply_one", side_effect=always_raise):
+        applied = p.tick_once()
+
+    assert applied == 0
+    assert p.high_watermark is None
+    assert not state_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Audit C2-05 — ``_find_pi_lot_for_cloud_lot`` product-fallback must NOT
+# flip an arbitrary in_flight Pi lot when >1 candidate matches the product.
+# It must DEFER (skip + log), leaving every candidate untouched, mirroring
+# the event_overrides G3 ambiguity guard.
+# ---------------------------------------------------------------------------
+
+
+def _seed_two_inflight_pi_lots_same_product(
+    conn: sqlite3.Connection,
+    *,
+    product_id: str = "prod-dup",
+) -> tuple[str, str]:
+    """Seed TWO Pi `lots` rows in 'in_flight' for the same product, each
+    with its OWN pickup_event_id (so NEITHER links to the cloud lot's
+    pickup_event_id — forcing the product fallback). Returns both lot_ids.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO products (product_id, name, net_weight_g) "
+        "VALUES (?, ?, ?)",
+        (product_id, "Dup Product", 100.0),
+    )
+    pi_lot_a = str(uuid.uuid4())
+    pi_lot_b = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, in_flight_since, "
+        "                  pickup_event_id) "
+        "VALUES (?, ?, 'in_flight', '2026-04-20T09:00:00Z', ?)",
+        (pi_lot_a, product_id, str(uuid.uuid4())),
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, in_flight_since, "
+        "                  pickup_event_id) "
+        "VALUES (?, ?, 'in_flight', '2026-04-20T10:00:00Z', ?)",
+        (pi_lot_b, product_id, str(uuid.uuid4())),
+    )
+    conn.commit()
+    return pi_lot_a, pi_lot_b
+
+
+def test_c2_05_ambiguous_product_fallback_defers_leaves_both_untouched(
+    conn, tmp_path, caplog
+):
+    """Cloud tombstone whose pickup_event_id links to NO Pi lot, with TWO
+    in_flight Pi lots sharing the product. The product fallback must
+    refuse to guess: NEITHER lot may be flipped to 'lost'; both stay
+    'in_flight'. The skip is counted + logged.
+    """
+    import logging as _logging
+
+    pi_lot_a, pi_lot_b = _seed_two_inflight_pi_lots_same_product(
+        conn, product_id="prod-dup"
+    )
+
+    # Cloud lot mirror for the SAME product, with a pickup_event_id that
+    # matches NEITHER Pi lot (so the exact-link path misses → product
+    # fallback fires).
+    cloud_lot_id = "cloud-dup"
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (lot_id, product_id, qty_containers,
+                                in_flight_since, in_flight_kind,
+                                pickup_event_id, updated_at)
+        VALUES (?, 'prod-dup', 1.0, '2026-04-20T10:00:00Z',
+                'catch_all', 'pe-unlinked', '2026-04-20T10:00:00Z')
+        """,
+        (cloud_lot_id,),
+    )
+    conn.commit()
+
+    # Cloud tombstones the lot → triggers _find_pi_lot_for_cloud_lot.
+    dead = _lot(
+        cloud_lot_id, product_id="prod-dup",
+        updated_at="2026-04-28T06:00:00Z", deleted_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(dead))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+
+    with caplog.at_level(
+        _logging.WARNING, logger="server.cloud.lot_snapshot_poller"
+    ):
+        p.tick_once()
+
+    # NEITHER Pi lot may be flipped — both must still be 'in_flight'.
+    statuses = {
+        r["lot_id"]: r["status"]
+        for r in conn.execute(
+            "SELECT lot_id, status FROM lots WHERE product_id = 'prod-dup'"
+        ).fetchall()
+    }
+    assert statuses[pi_lot_a] == "in_flight", (
+        f"lot A was arbitrarily flipped to {statuses[pi_lot_a]!r} on an "
+        "ambiguous product fallback"
+    )
+    assert statuses[pi_lot_b] == "in_flight", (
+        f"lot B was arbitrarily flipped to {statuses[pi_lot_b]!r} on an "
+        "ambiguous product fallback"
+    )
+
+    # The ambiguity skip is counted and logged.
+    assert p.skipped_ambiguous_count == 1
+    assert any(
+        "AMBIGUOUS product-fallback" in rec.message for rec in caplog.records
+    ), "expected an AMBIGUOUS product-fallback warning log"
+
+
+def test_c2_05_single_inflight_lot_still_flips_unambiguously(conn, tmp_path):
+    """Control: with exactly ONE in_flight Pi lot for the product (no
+    pickup_event_id link), the product fallback is unambiguous and still
+    flips it. Proves the guard fires ONLY on >1, not on every fallback —
+    so it doesn't break the legitimate single-lot recovery path.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO products (product_id, name, net_weight_g) "
+        "VALUES (?, ?, ?)",
+        ("prod-solo", "Solo Product", 100.0),
+    )
+    pi_lot = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, in_flight_since, "
+        "                  pickup_event_id) "
+        "VALUES (?, 'prod-solo', 'in_flight', '2026-04-20T09:00:00Z', ?)",
+        (pi_lot, str(uuid.uuid4())),
+    )
+    cloud_lot_id = "cloud-solo"
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (lot_id, product_id, qty_containers,
+                                in_flight_since, in_flight_kind,
+                                pickup_event_id, updated_at)
+        VALUES (?, 'prod-solo', 1.0, '2026-04-20T10:00:00Z',
+                'catch_all', 'pe-unlinked', '2026-04-20T10:00:00Z')
+        """,
+        (cloud_lot_id,),
+    )
+    conn.commit()
+
+    dead = _lot(
+        cloud_lot_id, product_id="prod-solo",
+        updated_at="2026-04-28T06:00:00Z", deleted_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(dead))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    p.tick_once()
+
+    status = conn.execute(
+        "SELECT status FROM lots WHERE lot_id = ?", (pi_lot,)
+    ).fetchone()["status"]
+    assert status == "lost", (
+        "single unambiguous in_flight lot must still be flipped to 'lost' "
+        "on tombstone — the guard must not over-trigger"
+    )
+    assert p.skipped_ambiguous_count == 0

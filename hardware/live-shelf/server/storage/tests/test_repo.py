@@ -279,6 +279,42 @@ class TestLots:
         assert got is not None
         assert got.lot_id == lot.lot_id
 
+    def test_get_lot_preserves_single_item_shelf_id(self, conn):
+        """Audit C3-01: ``_row_to_lot`` must NOT silently rewrite a
+        ``shelf_id='single_item'`` row to ``'live_shelf'`` on read.
+
+        ``single_item`` is a first-class shelf discriminator — it's in the
+        ``lots.shelf_id`` CHECK whitelist (schema.sql) and the ``ShelfId``
+        Literal (models.py). A lot stored with it must round-trip
+        unchanged; rewriting it to 'live_shelf' is set-once corruption
+        that mis-routes the lot to the wrong shelf's logic.
+        """
+        p = _make_product(conn)
+        lot_id = repo.new_id()
+        # Insert directly so the stored value is unambiguous (the schema
+        # CHECK accepts 'single_item'; this is a legitimate persisted row).
+        conn.execute(
+            "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+            "                  initial_weight_g, shelf_id) "
+            "VALUES (?, ?, 'on_shelf', 300.0, 320.0, 'single_item')",
+            (lot_id, p.product_id),
+        )
+        conn.commit()
+
+        # Sanity: the value really is 'single_item' at the SQL layer.
+        raw = conn.execute(
+            "SELECT shelf_id FROM lots WHERE lot_id = ?", (lot_id,)
+        ).fetchone()[0]
+        assert raw == "single_item"
+
+        # Read back through the repo (→ _row_to_lot). It must round-trip.
+        got = repo.get_lot(conn, lot_id)
+        assert got is not None
+        assert got.shelf_id == "single_item", (
+            f"_row_to_lot rewrote shelf_id to {got.shelf_id!r}; "
+            "'single_item' must round-trip unchanged"
+        )
+
     def test_create_lot_with_explicit_timestamps(self, conn):
         p = _make_product(conn)
         lot = _make_lot(

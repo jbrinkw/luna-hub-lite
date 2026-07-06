@@ -130,7 +130,7 @@ def _row_to_lot(row: sqlite3.Row) -> Lot:
         pickup_weight_g=row["pickup_weight_g"] if "pickup_weight_g" in keys else None,
         pickup_event_id=row["pickup_event_id"] if "pickup_event_id" in keys else None,
         pickup_session_id=row["pickup_session_id"] if "pickup_session_id" in keys else None,
-        shelf_id=shelf_raw if shelf_raw in ("live_shelf", "catch_all") else "live_shelf",
+        shelf_id=shelf_raw if shelf_raw in ("live_shelf", "catch_all", "single_item") else "live_shelf",
     )
 
 

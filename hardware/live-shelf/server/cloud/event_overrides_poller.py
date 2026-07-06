@@ -510,14 +510,22 @@ class EventOverridesPoller(threading.Thread):
                 continue
             outcomes[self._override_key(override)] = ("SKIPPED", "TRANSIENT")
 
-        if not lots:
-            # G7: zero-lots payload is a legitimate (empty) batch
-            # observation; defer miss-count cleanup to the apply path
-            # below (which is skipped here). Return early; the caller
-            # treats all-TRANSIENT outcomes as "freeze watermark", which
-            # is the right thing — without lots[] we couldn't apply
-            # anything anyway and the next tick should retry.
-            return 0, outcomes
+        # C2-04 (2026-06-15): DO NOT early-return on an empty ``lots`` when
+        # there are real overrides. The old code returned here with every
+        # outcome left at the TRANSIENT default, which the caller treats
+        # as "freeze the watermark". A batch carrying genuine overrides
+        # but an empty ``lots[]`` therefore froze the cursor FOREVER —
+        # the same override re-fetched every tick, never advancing,
+        # blocking every newer override behind it. Per the cloud
+        # contract (see the ``cloud_lot is None`` branch below): the
+        # /overrides endpoint ALWAYS emits the post-reconcile lot row
+        # alongside its override; a missing lot row means the cloud
+        # tombstoned the lot or never had one, which no retry will fix —
+        # i.e. PERMANENT. We fall through to the per-override loop so each
+        # override hits the empty lot indexes, gets classified PERMANENT
+        # (``cloud_lot is None``), and the watermark advances past it.
+        # When ``overrides`` is also empty the loop simply runs zero
+        # times and we return ``(0, {})`` as before (no churn).
 
         # Index cloud lots by resolved_lot_id (preferred direct lookup) and
         # also by product_id (legacy fallback for payloads where the

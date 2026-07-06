@@ -1122,3 +1122,190 @@ def test_ambiguous_cloud_lots_with_no_active_pi_lot_does_not_emit(conn):
     # /healthz can still surface the operator-action condition.
     stats = poller.last_tick_stats
     assert stats["skipped_ambiguous_count"] == 1, stats
+
+
+# ---------------------------------------------------------------------------
+# C2-03 (2026-06-15) — >1 Pi lots collapse onto ONE cloud_lot_id
+# ---------------------------------------------------------------------------
+#
+# The INVERSE of G5. G5 fires when a product has >1 active *cloud_lots*.
+# C2-03 fires when a product has exactly ONE active cloud_lot but >1 active
+# Pi `lots` rows: the live_shelf SQL maps every Pi row onto the SAME
+# cloud_lot_id, so before the fix BOTH rows flowed into the emit loop and
+# emitted `live_weight_sync` with CONFLICTING weights for the same cloud
+# lot on every tick — a permanent flap of `last_observed_weight_g`.
+# G5's guard (HAVING COUNT(*) > 1 on cloud_lots) does NOT catch this
+# because there is only one cloud_lot. The C2-03 fix detects cloud_lot_ids
+# that >1 Pi row collapses onto, skips ALL of them, logs, and bumps
+# `skipped_collapsed_count` (a SEPARATE counter from G5's).
+
+
+def test_two_pi_lots_one_cloud_lot_does_not_double_emit_conflicting_weights(
+    conn, caplog,
+):
+    """C2-03: two active Pi `lots` rows for the same product, ONE active
+    cloud_lot. The poller must NOT emit two conflicting live_weight_sync
+    events for that single cloud_lot_id every tick — it skips the
+    collapse, logs a WARNING naming the cloud_lot_id + both Pi lot_ids,
+    and bumps `skipped_collapsed_count` (NOT `skipped_ambiguous_count`,
+    which is G5's and must stay 0 here since there is only one cloud_lot).
+    """
+    pid = _seed_product(conn, name="MILK-COLLAPSE")
+    # Exactly ONE active cloud_lot for the product — so G5 does NOT fire.
+    cloud_lot_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0, lot_id=cloud_lot_id,
+        created_at="2026-06-01T00:00:00Z",
+    )
+    # Two Pi `lots` rows, both observing weight, DIFFERENT weights (>5g
+    # apart so the throttle would let the second one re-emit if reached).
+    pi_lot_1 = "11111111-beef-beef-beef-111111111111"
+    pi_lot_2 = "22222222-beef-beef-beef-222222222222"
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1800.0, 'live_shelf')",
+        (pi_lot_1, pid),
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1750.0, 'live_shelf')",
+        (pi_lot_2, pid),
+    )
+    conn.commit()
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    with caplog.at_level("WARNING", logger="server.cloud.weight_sync_poller"):
+        n = poller.tick_once()
+
+    # The crux: ZERO emits for the shared cloud_lot_id. Before the fix
+    # this was TWO (1800g then 1750g), permanently flapping the cloud's
+    # last_observed_weight_g.
+    emits_for_cloud_lot = [
+        c.kwargs
+        for c in emitter.emit_live_weight_sync.call_args_list
+        if c.kwargs.get("pi_lot_id") == cloud_lot_id
+    ]
+    assert emits_for_cloud_lot == [], (
+        "collapse must skip the cloud_lot entirely, not emit conflicting "
+        f"weights: {emits_for_cloud_lot}"
+    )
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+
+    stats = poller.last_tick_stats
+    # One CLOUD LOT was collapsed onto by >1 Pi lot.
+    assert stats["skipped_collapsed_count"] == 1, stats
+    # G5's counter must stay 0 — only one cloud_lot exists, so this is
+    # NOT the G5 ambiguous-cloud_lots condition.
+    assert stats["skipped_ambiguous_count"] == 0, stats
+    assert stats["emitted"] == 0
+
+    # WARNING must surface the cloud_lot_id + BOTH colliding Pi lot_ids so
+    # the operator can consolidate.
+    warn_msgs = [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.levelname == "WARNING"
+    ]
+    joined = " ".join(warn_msgs)
+    assert cloud_lot_id in joined, warn_msgs
+    assert pi_lot_1 in joined
+    assert pi_lot_2 in joined
+
+
+def test_single_pi_lot_one_cloud_lot_still_emits_collapse_regression(conn):
+    """C2-03 regression: the collapse guard must NOT touch the happy
+    path — one Pi lot resolving to one cloud_lot emits normally and
+    `skipped_collapsed_count` stays 0."""
+    pid = _seed_product(conn, name="SOLO-COLLAPSE")
+    pi_lot_id = _seed_lot(
+        conn, product_id=pid, shelf_id="live_shelf", current_weight_g=480.0,
+    )
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,),
+    ).fetchone()["lot_id"]
+    assert cloud_lot_id != pi_lot_id
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 1
+    stats = poller.last_tick_stats
+    assert stats["skipped_collapsed_count"] == 0, stats
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+    assert kwargs["observed_weight_g"] == pytest.approx(480.0)
+
+
+# ---------------------------------------------------------------------------
+# C2-07 (2026-06-15) — real cloud-namespace validation (not a dead cast)
+# ---------------------------------------------------------------------------
+#
+# `_maybe_emit` used to run `CloudLotId(raw_lot_id)` — a NewType identity
+# cast that can never raise — inside a try/except whose comment falsely
+# claimed "verification". A leaked Pi-local lot_id sailed straight through
+# and produced an `applied=false 'lot_id not found'` cloud event. The fix
+# calls the REAL `parse_cloud_lot_id` (verifies presence in cloud_lots)
+# for shelf-JOIN rows (those carrying a `cloud_lot_id` key), while leaving
+# the live_scale pass-through branch (scale_pairings.lot_id, intentionally
+# absent from cloud_lots) on the identity promotion.
+
+
+def test_shelf_join_row_with_non_cloud_lot_id_is_rejected_not_emitted(conn):
+    """C2-07: a shelf-JOIN row (carries a ``cloud_lot_id`` key) whose
+    lot_id is NOT present in the cloud_lots mirror — i.e. a leaked
+    Pi-local id — must be rejected by the real namespace check and NOT
+    emitted. With the old identity cast this id sailed through and was
+    emitted, producing an applied=false dead-letter in the cloud.
+    """
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+    leaked_pi_local_id = "8923f32f-37f6-400b-ae07-e5fc25faee55"
+    # Sanity: this id is genuinely absent from cloud_lots.
+    assert (
+        conn.execute(
+            "SELECT 1 FROM cloud_lots WHERE lot_id = ?", (leaked_pi_local_id,),
+        ).fetchone()
+        is None
+    )
+    # Shape matches what _fetch_candidates emits for a shelf-JOIN row:
+    # ``cloud_lot_id`` present (this is the branch the real check guards).
+    row = {
+        "lot_id": leaked_pi_local_id,
+        "cloud_lot_id": leaked_pi_local_id,
+        "pi_local_lot_id": "00000000-0000-0000-0000-000000000001",
+        "current_weight_g": 200.0,
+        "shelf_id": "live_shelf",
+    }
+
+    fired = poller._maybe_emit(row, now_mono=0.0)
+
+    assert fired is False, "leaked non-cloud lot_id must be rejected"
+    emitter.emit_live_weight_sync.assert_not_called()
+
+
+def test_shelf_join_row_with_real_cloud_lot_id_still_emits(conn):
+    """C2-07 companion: the validation must ACCEPT a lot_id that really
+    exists in cloud_lots — proving the check verifies provenance rather
+    than blanket-rejecting. (If the fix over-rejected, this would fail
+    and the rejection test alone could be passed by a stub that always
+    returns False.)"""
+    pid = _seed_product(conn, name="REAL-CLOUD-LOT")
+    cloud_lot_id = "afc2ab94-e63d-4404-9f3c-39b4c6e347ae"
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0, lot_id=cloud_lot_id,
+    )
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+    row = {
+        "lot_id": cloud_lot_id,
+        "cloud_lot_id": cloud_lot_id,
+        "pi_local_lot_id": "00000000-0000-0000-0000-000000000002",
+        "current_weight_g": 321.0,
+        "shelf_id": "live_shelf",
+    }
+
+    fired = poller._maybe_emit(row, now_mono=0.0)
+
+    assert fired is True
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+    assert kwargs["observed_weight_g"] == pytest.approx(321.0)
