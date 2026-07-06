@@ -4,6 +4,10 @@ import { getHACredentials, callService } from './ha-api';
 import { formatTvRemoteAction } from './nl-formatters';
 
 const COMMAND_MAP: Record<string, string> = {
+  // Power (Android TV KEYCODE_POWER toggle). Was silently supported by the
+  // legacy uppercase pass-through; must stay a recognized command after the
+  // B4-05 allowlist tightening.
+  power: 'POWER',
   // Navigation
   up: 'DPAD_UP',
   down: 'DPAD_DOWN',
@@ -77,14 +81,14 @@ export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
   name: 'HOMEASSISTANT_tv_remote',
   extensionName: 'homeassistant',
   description:
-    'Control your TV remote — navigation (up/down/left/right/ok/back/home), media (play/pause/stop/next/previous), volume (mute/volume up/volume down), or launch apps (youtube/netflix/spotify/disney).',
+    'Control your TV remote — power, navigation (up/down/left/right/ok/back/home), media (play/pause/stop/next/previous), volume (mute/volume up/volume down), or launch apps (youtube/netflix/spotify/disney).',
   inputSchema: {
     type: 'object',
     properties: {
       button: {
         type: 'string',
         description:
-          'The action to perform: navigation (up, down, left, right, ok, back, home), media (play, pause, stop, next, previous, rewind, ff), volume (mute, volume up, volume down), or app name (youtube, netflix, spotify, disney, "open youtube")',
+          'The action to perform: power, navigation (up, down, left, right, ok, back, home), media (play, pause, stop, next, previous, rewind, ff), volume (mute, volume up, volume down), or app name (youtube, netflix, spotify, disney, "open youtube")',
       },
     },
     required: ['button'],
@@ -103,7 +107,7 @@ export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
 
     if (intent.type === 'unknown') {
       return toolError(
-        `Unrecognized TV command: "${button}". Supported: navigation (up, down, left, right, ok, back, home), ` +
+        `Unrecognized TV command: "${button}". Supported: power, navigation (up, down, left, right, ok, back, home), ` +
           `media (play, pause, stop, next, previous, rewind, ff), volume (mute, volume up, volume down), ` +
           `or an app (youtube, netflix, spotify, disney, or "open <app>").`,
       );

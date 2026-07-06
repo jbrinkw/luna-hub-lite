@@ -2062,8 +2062,9 @@ describe('HOMEASSISTANT_tv_remote', () => {
     expect(body.entity_id).toBe('remote.living_room_tv');
   });
 
-  it('passes unknown button through as raw uppercase command (legacy behavior)', async () => {
-    // Legacy: unknown buttons are sent as uppercase command strings
+  it('power is a recognized command mapped to the POWER keycode (B4-05 allowlist)', async () => {
+    // Legacy uppercase pass-through happened to support power; after the
+    // B4-05 allowlist tightening it must be an explicit COMMAND_MAP entry.
     mockFetch.mockReturnValueOnce(mockFetchResponse([]));
 
     const result = await handler({ button: 'power' }, haCtx());
@@ -2076,6 +2077,18 @@ describe('HOMEASSISTANT_tv_remote', () => {
     expect(url).toBe('https://homeassistant.local:8123/api/services/remote/send_command');
     const body = JSON.parse(opts.body);
     expect(body.command).toBe('POWER');
+  });
+
+  it('rejects an unrecognized button with toolError and NO service call (B4-05)', async () => {
+    // The legacy behavior forwarded arbitrary tokens uppercased ("BARREL ROLL")
+    // and reported success — a junk HA call the audit killed. Unrecognized
+    // input must now error without touching the network.
+    const result = await handler({ button: 'barrel roll' }, haCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Unrecognized TV command');
+    expect(result.content[0].text).toContain('barrel roll');
+    expect(mockFetch).toHaveBeenCalledTimes(0);
   });
 
   it('returns toolError when credentials are missing', async () => {
