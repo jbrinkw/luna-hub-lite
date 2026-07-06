@@ -1,6 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, getTree, getFileContent, putFileContent } from './git-api';
+import { getGitCredentials, getTree, getFileContent, putFileContent, deleteFileContent } from './git-api';
 import { buildProjectTree } from './vault-parser';
 
 /** Validate a single path segment. Trims, rejects empties + invalid chars. */
@@ -83,12 +83,34 @@ export const OBSIDIAN_create_project: ExtensionToolDefinition = {
 
       const descLine = args.description ? `\n${String(args.description).trim()}\n` : '';
       const rootBody = `# ${rawName}\n${descLine}`;
-      await putFileContent(creds, rootPath, rootBody, `project: create ${folderPath}`);
+      const rootSha = await putFileContent(creds, rootPath, rootBody, `project: create ${folderPath}`);
 
       let createdNotes = false;
       if (!existingNotes) {
         const notesBody = `---\nnote_project_id: ${rawName}\n---\n`;
-        await putFileContent(creds, notesPath, notesBody, `project: notes skeleton ${folderPath}`);
+        try {
+          await putFileContent(creds, notesPath, notesBody, `project: notes skeleton ${folderPath}`);
+        } catch (notesErr) {
+          // B4-06: the two commits are non-atomic. If the Notes.md commit fails
+          // after the root file was already created, roll the root file back so
+          // the caller isn't left with a half-created project that the
+          // existence probe would block on retry. Best-effort rollback; we still
+          // surface the original Notes failure.
+          try {
+            await deleteFileContent(
+              creds,
+              rootPath,
+              rootSha,
+              `project: rollback ${folderPath} (Notes.md commit failed)`,
+            );
+          } catch (rollbackErr) {
+            // Rollback itself failed — the root page is now orphaned. Log so the
+            // operator can clean it up; we still surface the original Notes
+            // failure (not this one) to the caller below.
+            console.warn(`create_project: rollback of ${rootPath} failed:`, (rollbackErr as Error).message);
+          }
+          return toolError(`Failed to create Notes.md (rolled back root page): ${(notesErr as Error).message}`);
+        }
         createdNotes = true;
       }
 

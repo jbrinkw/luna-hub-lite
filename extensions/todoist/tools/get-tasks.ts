@@ -1,6 +1,7 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
 import { TODOIST_API_BASE } from './constants';
+import { fetchAllTodoistPages } from './paginate';
 
 export const TODOIST_get_tasks: ExtensionToolDefinition = {
   name: 'TODOIST_get_tasks',
@@ -25,16 +26,10 @@ export const TODOIST_get_tasks: ExtensionToolDefinition = {
       const qs = params.toString();
       const url = `${TODOIST_API_BASE}/tasks${qs ? `?${qs}` : ''}`;
 
-      const resp = await fetch(url, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${todoist_api_key}` },
-      });
-
-      if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
-
-      const data: any = await resp.json();
-      // v1 API wraps list responses in { results: [...] }
-      return toolSuccess(Array.isArray(data) ? data : (data.results ?? data));
+      // v1 API paginates list responses via next_cursor — follow every page so
+      // large task lists aren't silently truncated at the ~50-row first page.
+      const all = await fetchAllTodoistPages(url, { Authorization: `Bearer ${todoist_api_key}` });
+      return toolSuccess(all);
     } catch (e) {
       return toolError(`Network error: ${(e as Error).message}`);
     }

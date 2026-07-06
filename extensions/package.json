@@ -1,0 +1,13 @@
+{
+  "name": "@luna-hub/extensions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@luna-hub/app-tools": "workspace:*",
+    "vitest": "^4.0.18"
+  }
+}

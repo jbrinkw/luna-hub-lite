@@ -147,7 +147,7 @@ export async function putFileContent(
   content: string,
   message: string,
   sha?: string,
-): Promise<void> {
+): Promise<string> {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const url = `${repoUrl(creds)}/contents/${encodedPath}`;
   const body: Record<string, string> = {
@@ -159,6 +159,34 @@ export async function putFileContent(
     method: 'PUT',
     headers: headers(creds),
     body: JSON.stringify(body),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Git API error: ${resp.status} ${resp.statusText} ${text.slice(0, 200)}`);
+  }
+  // Return the created/updated blob sha so callers can roll the write back
+  // (needed by the DELETE contents API, which requires the file's sha).
+  const json = (await resp.json().catch(() => ({}))) as { content?: { sha?: string } };
+  return json?.content?.sha ?? '';
+}
+
+/**
+ * Delete a file via the GitHub Contents API (DELETE /contents/{path}). Requires
+ * the file's current blob `sha`. Used to roll back a partially-created project
+ * (B4-06) when a follow-up commit fails.
+ */
+export async function deleteFileContent(
+  creds: GitCredentials,
+  path: string,
+  sha: string,
+  message: string,
+): Promise<void> {
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `${repoUrl(creds)}/contents/${encodedPath}`;
+  const resp = await fetch(url, {
+    method: 'DELETE',
+    headers: headers(creds),
+    body: JSON.stringify({ message, sha }),
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');

@@ -33,7 +33,12 @@ export async function fetchStates(creds: HACredentials): Promise<any[]> {
 }
 
 export async function getEntityState(creds: HACredentials, entityId: string): Promise<any | null> {
-  const resp = await fetch(`${creds.url}/api/states/${entityId}`, { headers: haHeaders(creds) });
+  // entity_id is user-influenced free-form text. Encode it so characters with
+  // special URL-path meaning (space, #, ?, …) cannot break out of the path
+  // segment or silently truncate the request.
+  const resp = await fetch(`${creds.url}/api/states/${encodeURIComponent(entityId)}`, {
+    headers: haHeaders(creds),
+  });
   if (resp.status === 404) return null;
   if (!resp.ok) throw new Error(`HA API error: ${resp.status} ${resp.statusText}`);
   return resp.json();
@@ -45,7 +50,7 @@ export async function callService(
   service: string,
   data: Record<string, unknown>,
 ): Promise<any> {
-  const resp = await fetch(`${creds.url}/api/services/${domain}/${service}`, {
+  const resp = await fetch(`${creds.url}/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
     method: 'POST',
     headers: haHeaders(creds),
     body: JSON.stringify(data),
@@ -130,6 +135,27 @@ export async function resolveEntityId(
   }
   if (partial.length === 1) return [partial[0], null];
   if (partial.length > 1) return [null, `Multiple entities partially match: ${partial.slice(0, 5).join(', ')}`];
+
+  // Unfiltered exact-name fallback. inferDomain() forces a single domain for
+  // some keywords (e.g. "tv"/"speaker" -> media_player only). A device that is
+  // correctly named but lives in another *allowed* domain (e.g. a smart plug
+  // exposed as `switch.tv`) is invisible to the domain-filtered passes above.
+  // Retry by exact friendly name across ALL allowed domains so it still
+  // resolves. Domain-correct matches are already handled above and win first,
+  // so this only fires when the filtered passes found nothing.
+  if (allowedDomains) {
+    const exactAny: string[] = [];
+    for (const st of states) {
+      const eid = st.entity_id;
+      if (!eid || !eid.includes('.')) continue;
+      const domain = eid.split('.')[0];
+      if (!(ALLOWED_DOMAINS as readonly string[]).includes(domain)) continue;
+      const fname = normalize(st.attributes?.friendly_name || '');
+      if (fname === target) exactAny.push(eid);
+    }
+    if (exactAny.length === 1) return [exactAny[0], null];
+    if (exactAny.length > 1) return [null, `Multiple entities match: ${exactAny.slice(0, 5).join(', ')}`];
+  }
 
   return [null, `Entity '${identifier}' not found`];
 }

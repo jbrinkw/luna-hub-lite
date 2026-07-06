@@ -42,12 +42,15 @@ const APP_MAP: Record<string, string> = {
   'disney+': 'com.disney.disneyplus',
 };
 
-function parseIntent(button: string): { type: 'command'; command: string } | { type: 'app'; activity: string } {
+type TvIntent = { type: 'command'; command: string } | { type: 'app'; activity: string } | { type: 'unknown' };
+
+function parseIntent(button: string): TvIntent {
   const b = button.toLowerCase().trim();
 
   // Check for "open X" / "launch X" pattern — fall back to raw name if not in APP_MAP
   if (b.startsWith('open ') || b.startsWith('launch ')) {
     const appName = b.split(' ').slice(1).join(' ').trim();
+    if (!appName) return { type: 'unknown' };
     return { type: 'app', activity: APP_MAP[appName] || appName };
   }
 
@@ -59,17 +62,15 @@ function parseIntent(button: string): { type: 'command'; command: string } | { t
     return { type: 'app', activity: button.trim() };
   }
 
-  // Check command map — reject unknown commands
+  // Check command map — only recognized commands are forwarded.
   const command = COMMAND_MAP[b];
   if (command) return { type: 'command', command };
 
-  // Fall back to uppercase command for single-word inputs only
-  if (!b.includes(' ') && !b.includes('.') && !b.includes('/') && b.length <= 30) {
-    return { type: 'command', command: button.trim().toUpperCase() };
-  }
-
-  // Reject anything else — don't pass arbitrary strings to HA
-  return { type: 'command', command: 'UNKNOWN' };
+  // Anything else is unrecognized. Do NOT invent a sentinel or blindly forward
+  // an uppercased arbitrary token to HA — that produced a junk service call
+  // that HA accepts and we'd wrongly report as success. Signal "unknown" so the
+  // handler can return a tool error without making the request.
+  return { type: 'unknown' };
 }
 
 export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
@@ -99,6 +100,14 @@ export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
     const remoteEntity = /^remote\.[a-z0-9_]+$/.test(rawRemoteEntity) ? rawRemoteEntity : 'remote.living_room_tv';
 
     const intent = parseIntent(button);
+
+    if (intent.type === 'unknown') {
+      return toolError(
+        `Unrecognized TV command: "${button}". Supported: navigation (up, down, left, right, ok, back, home), ` +
+          `media (play, pause, stop, next, previous, rewind, ff), volume (mute, volume up, volume down), ` +
+          `or an app (youtube, netflix, spotify, disney, or "open <app>").`,
+      );
+    }
 
     try {
       if (intent.type === 'command') {
