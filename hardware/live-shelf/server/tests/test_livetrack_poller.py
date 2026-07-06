@@ -126,9 +126,11 @@ def test_poll_cadence_active_vs_idle():
     # Next tick — stub is empty → idle.
     assert poller._poll_once() is False
 
-    # Sanity: the module-level constants match the plan.
+    # Sanity: the module-level constants match the plan. IDLE_POLL_S was bumped
+    # 2s -> 30s in POLLING_REFACTOR_PLAN.md §0 to cut the edge-fn quota burn
+    # (the idle pairing-poll was ~43K calls/day); ACTIVE stays 0.5s.
     assert ACTIVE_POLL_S == pytest.approx(0.5)
-    assert IDLE_POLL_S == pytest.approx(2.0)
+    assert IDLE_POLL_S == pytest.approx(30.0)
 
 
 # ---------------------------------------------------------------------------
