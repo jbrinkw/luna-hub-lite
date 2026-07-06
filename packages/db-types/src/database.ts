@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   chefbyte: {
     Tables: {
       event_overrides: {
@@ -1162,6 +1167,10 @@ export type Database = {
           out_qty_containers: number
         }[]
       }
+      analyze_check_and_increment: {
+        Args: { p_quota?: number; p_user_id: string }
+        Returns: Json
+      }
       apply_discard_with_lot_id_admin: {
         Args: {
           p_client_event_id: string
@@ -1261,6 +1270,28 @@ export type Database = {
               isSetofReturn: false
             }
           }
+        | {
+            Args: {
+              p_after_weight_g: number
+              p_client_event_id: string
+              p_delta_g: number
+              p_device_id: string
+              p_event_kind: string
+              p_kind: string
+              p_occurred_at: string
+              p_pi_event_id: string
+              p_product_id: string
+              p_scale_id: string
+              p_user_id: string
+            }
+            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+            SetofOptions: {
+              from: "*"
+              to: "shelf_event_result"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
       close_in_flight_lot: {
         Args: { p_lot_id: string; p_note?: string; p_resolution: string }
         Returns: string
@@ -1288,6 +1319,31 @@ export type Database = {
         }
         Returns: Json
       }
+      execute_scan_action: {
+        Args: {
+          p_mode: string
+          p_nutrition_snapshot: Json
+          p_product_id: string
+          p_qty: number
+          p_unit: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      execute_scan_and_record: {
+        Args: {
+          p_barcode: string
+          p_mode: string
+          p_nutrition_snapshot: Json
+          p_pi_event_id: string
+          p_product_id: string
+          p_qty: number
+          p_source: string
+          p_unit: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       export_chefbyte_backup: { Args: never; Returns: Json }
       get_daily_macros: { Args: { p_logical_date: string }; Returns: Json }
       get_daily_macros_admin: {
@@ -1300,6 +1356,10 @@ export type Database = {
       }
       import_shopping_to_inventory: {
         Args: { p_location_id?: string }
+        Returns: Json
+      }
+      import_shopping_to_inventory_admin: {
+        Args: { p_location_id?: string; p_user_id: string }
         Returns: Json
       }
       mark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
@@ -1361,6 +1421,10 @@ export type Database = {
         Args: { p_ingredients: Json; p_recipe_id: string }
         Returns: undefined
       }
+      save_recipe_ingredients_admin: {
+        Args: { p_ingredients: Json; p_recipe_id: string; p_user_id: string }
+        Returns: undefined
+      }
       unmark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
       unmark_meal_done_admin: {
         Args: { p_meal_id: string; p_user_id: string }
@@ -1413,6 +1477,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      void_scan_transaction: {
+        Args: { p_transaction_id: string }
+        Returns: undefined
       }
       walmart_check_and_increment: {
         Args: { p_max?: number; p_user_id: string }
@@ -2204,6 +2272,36 @@ export type Database = {
         Args: { p_credentials_json: string; p_extension_name: string }
         Returns: undefined
       }
+      upsert_alert: {
+        Args: {
+          p_details: Json
+          p_invariant_name: string
+          p_severity: string
+          p_subject_id: string
+          p_subject_type: string
+          p_user_id: string
+        }
+        Returns: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          acknowledged_note: string | null
+          alert_id: string
+          created_at: string
+          dedup_key: string | null
+          details: Json
+          invariant_name: string
+          severity: string
+          subject_id: string | null
+          subject_type: string
+          user_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "alerts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       [_ in never]: never
@@ -2223,6 +2321,10 @@ export type Database = {
       activate_app: {
         Args: { p_app_name: string; p_user_id: string }
         Returns: undefined
+      }
+      analyze_check_and_increment: {
+        Args: { p_quota?: number; p_user_id: string }
+        Returns: Json
       }
       apply_discard_with_lot_id: {
         Args: {
@@ -2259,6 +2361,23 @@ export type Database = {
           p_stock_qty_override?: number
         }
         Returns: string
+      }
+      apply_live_scale_measurement: {
+        Args: {
+          p_after_weight_g: number
+          p_device_id: string
+          p_occurred_at: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       apply_live_weight_sync: {
         Args: {
@@ -2302,6 +2421,29 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      apply_shelf_event_body: {
+        Args: {
+          p_after_weight_g: number
+          p_client_event_id: string
+          p_delta_g: number
+          p_device_id: string
+          p_event_kind: string
+          p_kind: string
+          p_log_id: string
+          p_occurred_at: string
+          p_pi_event_id: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       bump_api_key_used: {
         Args: { p_api_key_hash: string }
         Returns: undefined
@@ -2324,6 +2466,7 @@ export type Database = {
         }
         Returns: {
           completed: boolean
+          completed_set_id: string
           rest_seconds: number
         }[]
       }
@@ -2345,6 +2488,31 @@ export type Database = {
       }
       ensure_daily_plan: {
         Args: { p_day: string; p_user_id: string }
+        Returns: Json
+      }
+      execute_scan_action: {
+        Args: {
+          p_mode: string
+          p_nutrition_snapshot: Json
+          p_product_id: string
+          p_qty: number
+          p_unit: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      execute_scan_and_record: {
+        Args: {
+          p_barcode: string
+          p_mode: string
+          p_nutrition_snapshot: Json
+          p_pi_event_id: string
+          p_product_id: string
+          p_qty: number
+          p_source: string
+          p_unit: string
+          p_user_id: string
+        }
         Returns: Json
       }
       expire_timer: {
@@ -2515,6 +2683,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      void_scan_transaction: {
+        Args: { p_transaction_id: string }
+        Returns: undefined
+      }
       walmart_check_and_increment: {
         Args: { p_max?: number; p_user_id: string }
         Returns: Json
@@ -2660,4 +2832,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-
