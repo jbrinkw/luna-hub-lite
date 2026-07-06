@@ -262,6 +262,29 @@ NUM_PAIRS=${#PAIR_TESTS[@]}
 log "total pairs to check: $NUM_PAIRS"
 
 # ---------------------------------------------------------------------------
+# Pair cap — bound total wall-clock deterministically.
+# ---------------------------------------------------------------------------
+# The gate is meant to run PR-scoped (a few pairs). When many commits accumulate
+# unpushed, origin/main...HEAD balloons and per-pair Stryker runs sum to hours
+# (this gate ran 4h+ across a 27-commit backlog). Cap the number of pairs; when
+# exceeded, check the cap and ADVISORY-skip the remainder with LOUD logging (not
+# a silent drop). Worst-case wall-clock is now MPG_MAX_PAIRS × MPG_PAIR_TIMEOUT_S.
+MPG_MAX_PAIRS="${MPG_MAX_PAIRS:-8}"
+ADVISORY_SKIPPED=0
+if [[ "$NUM_PAIRS" -gt "$MPG_MAX_PAIRS" ]]; then
+  log "WARNING: $NUM_PAIRS pairs exceed the cap of $MPG_MAX_PAIRS."
+  log "         Checking the first $MPG_MAX_PAIRS; the following are ADVISORY-SKIPPED"
+  log "         (push a smaller range or raise MPG_MAX_PAIRS to verify them):"
+  for ((k=MPG_MAX_PAIRS; k<NUM_PAIRS; k++)); do
+    log "           advisory-skip: ${PAIR_TESTS[$k]} → ${PAIR_PRODS[$k]}"
+  done
+  ADVISORY_SKIPPED=$((NUM_PAIRS - MPG_MAX_PAIRS))
+  PAIR_TESTS=("${PAIR_TESTS[@]:0:MPG_MAX_PAIRS}")
+  PAIR_PRODS=("${PAIR_PRODS[@]:0:MPG_MAX_PAIRS}")
+  NUM_PAIRS="$MPG_MAX_PAIRS"
+fi
+
+# ---------------------------------------------------------------------------
 # Warning: tests added but no prod code changed
 # ---------------------------------------------------------------------------
 HAS_TESTS_NO_PROD_PARTNER=0
@@ -366,10 +389,16 @@ NODE
   # Bump Node heap to 8GB — components config uses coverageAnalysis:off
   # which runs every test for every mutant; React Testing Library +
   # jsdom + 76+ mutants exhausts the default 2GB heap.
+  # Hard per-pair wall-clock cap. Stryker has its own PER-MUTANT timeout (which
+  # still writes a report), but a wedged Stryker process — sandbox spawn stuck,
+  # infinite pretest, jsdom deadlock — would otherwise hang the whole gate
+  # forever (this gate hung 4h+ across a 27-commit push before this cap). On
+  # `timeout` expiry Stryker is SIGKILLed with no report, which the no-report
+  # branch below converts to exit 3 (TIMEOUT_FAIL) — never a silent pass.
   local stryker_exit=0
   {
     NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" \
-      "$STRYKER_BIN" run "$temp_cfg" 2>&1
+      timeout --kill-after=15s "${MPG_PAIR_TIMEOUT_S:-300}" "$STRYKER_BIN" run "$temp_cfg" 2>&1
   } | tee -a "$LOG_FILE" ; stryker_exit=${PIPESTATUS[0]}
   rm -f "$temp_cfg" 2>/dev/null || true
 
@@ -427,10 +456,11 @@ for r in "${PAIR_RESULTS[@]}"; do
   PAIRS_RAW+="$r"$'\n'
 done
 
-echo "$PAIRS_RAW" | node --input-type=module - "$ARTIFACT" "$RAN_AT" "$DURATION_MS" "$OVERALL_EXIT" <<'NODE'
+echo "$PAIRS_RAW" | node --input-type=module - "$ARTIFACT" "$RAN_AT" "$DURATION_MS" "$OVERALL_EXIT" "${ADVISORY_SKIPPED:-0}" <<'NODE'
 import fs from 'node:fs';
-const [artifactPath, ranAt, durMs, exitRaw] = process.argv.slice(2);
+const [artifactPath, ranAt, durMs, exitRaw, skippedRaw] = process.argv.slice(2);
 const exitCode = Number(exitRaw);
+const advisorySkipped = Number(skippedRaw) || 0;
 
 let stdinData = '';
 process.stdin.setEncoding('utf8');
@@ -468,6 +498,10 @@ const artifact = {
   ran_at: ranAt,
   duration_ms: Number(durMs),
   mode: 'pr-scoped',
+  advisory_skipped: advisorySkipped,
+  ...(advisorySkipped > 0
+    ? { warning: `${advisorySkipped} pair(s) exceeded MPG_MAX_PAIRS and were advisory-skipped (not mutation-verified).` }
+    : {}),
   pairs,
   checks,
   failures,
