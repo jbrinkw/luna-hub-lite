@@ -13,10 +13,11 @@
 #
 # How anchors are identified:
 #   Each splice migration defines v_old_block as a multi-line E'' string.
-#   We extract the first non-whitespace text line inside that assignment as
-#   the "anchor" — typically the unique code pattern that distinguishes this
-#   splice from others. Two migrations with the same anchor text (first line
-#   of v_old_block) are flagged as a collision.
+#   The anchor is the ENTIRE normalized block (all non-empty lines joined),
+#   NOT just its first line — many distinct stock_lots splices share the first
+#   line "UPDATE chefbyte.stock_lots", which produced false collisions. A
+#   collision (same full block in two migrations) is the only real hazard:
+#   it means both splices target the identical function-body block.
 #
 # Exit codes:
 #   0 — no collisions (or no splice migrations found)
@@ -80,11 +81,13 @@ for m in re.finditer(
     chunks = re.findall(r"E'(.*?)'", raw, re.DOTALL)
     full_text = "".join(chunks)
     full_text = full_text.replace("\\n", "\n").replace("\\t", "\t")
-    for line in full_text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            anchors.append(stripped)
-            break
+    # Anchor = the ENTIRE normalized block, not just its first line. A splice
+    # collision is only real when two migrations target the SAME block; the
+    # first line alone (e.g. "UPDATE chefbyte.stock_lots") is shared by many
+    # distinct stock_lots splices and produced false collisions.
+    block_lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
+    if block_lines:
+        anchors.append(" | ".join(block_lines))
 
 # Pattern 2: v_old_* := 'plain string'; (no E prefix)
 for m in re.finditer(
@@ -92,11 +95,9 @@ for m in re.finditer(
     content, re.DOTALL
 ):
     text = m.group(1).replace("\\n", "\n").replace("\\t", "\t")
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped:
-            anchors.append(stripped)
-            break
+    block_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if block_lines:
+        anchors.append(" | ".join(block_lines))
 
 for a in anchors:
     print(a)
