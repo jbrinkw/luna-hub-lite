@@ -32,7 +32,10 @@ export function useUnitSystem(): UnitSystem {
         .from('profiles')
         .select('unit_system')
         .eq('user_id', user.id)
-        .single();
+        // maybeSingle, not single: a missing profile row (fresh/seeded account)
+        // must not 406 → browser console error. Null row falls through to the
+        // 'imperial' default below.
+        .maybeSingle();
       if (error) throw error;
       return row;
     },

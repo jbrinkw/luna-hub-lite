@@ -98,7 +98,10 @@ export function AccountPage() {
         .from('profiles')
         .select('display_name, timezone, day_start_hour, unit_system')
         .eq('user_id', user!.id)
-        .single();
+        // maybeSingle: a missing profile row must not 406 → console error. The
+        // form-sync effect below is guarded by `if (profile)`, so a null row
+        // simply leaves the fields at their defaults.
+        .maybeSingle();
       if (error) throw error;
       return data;
     },

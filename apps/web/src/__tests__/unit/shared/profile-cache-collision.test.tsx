@@ -55,7 +55,11 @@ vi.mock('@/shared/supabase', () => {
     const b: any = {};
     b.select = vi.fn(() => b);
     b.eq = vi.fn(() => b);
-    b.single = vi.fn(() => Promise.resolve({ data: { unit_system: 'metric' }, error: null }));
+    // useUnitSystem reads via .maybeSingle() (robust to a missing profile row);
+    // provide both so the mock tracks the hook regardless.
+    const resolve = () => Promise.resolve({ data: { unit_system: 'metric' }, error: null });
+    b.single = vi.fn(resolve);
+    b.maybeSingle = vi.fn(resolve);
     return b;
   };
   return {

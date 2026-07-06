@@ -84,7 +84,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         .from('profiles')
         .select('day_start_hour, timezone')
         .eq('user_id', user!.id)
-        .single();
+        // maybeSingle, not single: a user whose hub.profiles row hasn't been
+        // created yet (fresh signup, or a seeded/imported account) must not get
+        // a PostgREST 406 that surfaces as a browser console error and errors
+        // the query. Missing row → data null → the defaults below apply.
+        .maybeSingle();
       if (error) throw error;
       return {
         dayStartHour: data?.day_start_hour ?? 0,
