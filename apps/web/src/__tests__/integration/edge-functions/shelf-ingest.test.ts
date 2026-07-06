@@ -1123,19 +1123,56 @@ describe('shelf-ingest Edge Function', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /heartbeat rejects oversized scale_id (>128 chars) with 400', async () => {
+  it('POST /heartbeat drops an oversized scale_id (>128 chars) but still lands the heartbeat (liveness-first)', async () => {
+    // Deliberate contract (see shelf-ingest validScales block): a heartbeat is
+    // primarily a device-liveness signal. One malformed scale entry must NOT
+    // 400/blackhole last_heartbeat_ts — that exact failure (an untranslated
+    // legacy `single_item` literal) once showed every scale as "34d ago" while
+    // the Pi was alive. Invalid entries are dropped + logged; valid siblings
+    // and the device heartbeat still land.
     const hugeId = 'y'.repeat(129);
     const res = await fetch(`${BASE_URL}/heartbeat`, {
       method: 'POST',
       headers: authHeaders(importKey),
       body: JSON.stringify({
         pending_review_count: 0,
-        scales: [{ scale_id: hugeId, kind: 'live_shelf' }],
+        scales: [
+          { scale_id: hugeId, kind: 'live_shelf' },
+          { scale_id: 'hb-valid-sibling', kind: 'live_shelf' },
+        ],
       }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toMatch(/scale_id/i);
+    expect(body.ok).toBe(true);
+
+    // The oversized scale was dropped — never upserted into scale_pairings.
+    const { data: oversized } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('scale_pairings')
+      .select('scale_id')
+      .eq('device_id', deviceId)
+      .eq('scale_id', hugeId);
+    expect(oversized).toHaveLength(0);
+
+    // The valid sibling in the same payload still upserted.
+    const { data: sibling } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('scale_pairings')
+      .select('scale_id, last_heartbeat_ts')
+      .eq('device_id', deviceId)
+      .eq('scale_id', 'hb-valid-sibling');
+    expect(sibling).toHaveLength(1);
+    expect(sibling[0].last_heartbeat_ts).toBeTruthy();
+
+    // And device liveness landed.
+    const { data: dev } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('live_shelf_devices')
+      .select('last_heartbeat_ts')
+      .eq('device_id', deviceId)
+      .single();
+    expect(dev.last_heartbeat_ts).toBeTruthy();
   });
 
   // ─── Path routing — exact match ────────────────────────────────
